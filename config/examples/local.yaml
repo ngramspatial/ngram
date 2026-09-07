@@ -1,0 +1,20 @@
+# Example harness overlay: full local body + brain (reference only).
+# Merge into `configs/default.yaml` or keep as documentation.
+
+deployment:
+  mode: local
+
+inference:
+  provider: local
+  base_url: ""
+  timeout: 120
+
+memory:
+  database_url: ""
+  database_path: "~/.ngram/entities/{entity_name}/memory.db"
+
+attachments:
+  backend: local_disk
+
+ollama:
+  base_url: "http://127.0.0.1:11434"

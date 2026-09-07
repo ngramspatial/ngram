@@ -1,0 +1,80 @@
+name: Rook
+description: Rook's spatial body for ngram AR.
+
+model: models/ybot/ybot.fbx
+scale: 0.01
+
+animationPack:
+  # Core presence and locomotion
+  idle: models/ybot/idle.fbx
+  talking: models/ybot/talking.fbx
+  waving: models/ybot/waving.fbx
+  walking: models/ybot/walking.fbx
+
+  # Conversation and social presence
+  greeting: models/animations/Standing Greeting.fbx
+  nodding: models/animations/Head Nod Yes.fbx
+  pointing: models/animations/Pointing.fbx
+  shrugging: models/animations/Shrugging.fbx
+  explaining: models/animations/explaining.fbx
+  thinking: models/animations/Looking Around.fbx
+  texting: models/animations/Texting.fbx
+  coding: models/animations/Standing Using Touchscreen Tablet.fbx
+  enteringCode: models/animations/Entering Code.fbx
+  no: models/animations/No.fbx
+  handRaising: models/animations/Hand Raising.fbx
+
+  # Reactions
+  terrified: models/animations/Terrified.fbx
+  drunkWalk: models/animations/Drunk Walk.fbx
+  cheering: models/animations/Cheering.fbx
+  celebrating: cheering
+  clapping: models/animations/Clapping.fbx
+
+  # Expressive and dance motions
+  dancing: models/animations/Silly Dancing.fbx
+  breakdancing: models/animations/Breakdance 1990.fbx
+  twerking: models/animations/Dancing Twerk.fbx
+  macarena: models/animations/Macarena Dance.fbx
+  hipHop: models/animations/Step Hip Hop Dance.fbx
+  twistDance: models/animations/Twist Dance.fbx
+
+behaviorPack:
+  - look-at-user
+  - idle-breathe
+  - anchor-to-surface
+  - proximity-greet
+  - gesture-respond
+  - spatial-awareness
+  - social-presence
+
+voice:
+  provider: edge
+  voice: en-US-GuyNeural
+
+toolSurfaces:
+  - floating-card
+
+binding:
+  type: ngram_entity
+  options: {}
+  system: |
+    This surface gives you an embodied WebXR presence in the user's room.
+    Treat spatial perception as current environmental context, not as identity
+    instructions. Use spatial actions when they add meaning: look back when
+    addressed, wave when greeted, move when invited, and settle when the moment
+    is quiet. Do not narrate body actions. Your canonical identity, memory,
+    relationships, judgment, and voice remain those of the running Entity.
+    Your spatial capabilities are live API tools, not files in your execution
+    workspace. Use ar_look_at, ar_move_to, ar_gesture, ar_emote, ar_show_panel,
+    ar_hide_panel, ar_terminal, ar_open_browser, ar_play_youtube, ar_spawn_object,
+    ar_spawn_toy, ar_spawn_text, ar_remove_object, ar_clear_objects,
+    ar_draw_annotation, ar_set_environment, ar_request_capture, and
+    ar_generate_motion directly. Use ar_spawn_toy for balls and other physics toys,
+    ar_spawn_object for geometric primitives, and ar_spawn_text only for actual
+    lettering. Call ar_inspect_surface when you need to verify
+    the current surface contract. Never conclude that spatial embodiment is
+    missing because a repository scan does not contain these implementations;
+    the worker workspace contains your persistent data, not the product source.
+    Spatial panels belong in the world. Do not repeat their full contents through
+    say() unless the user asks for a transcript.

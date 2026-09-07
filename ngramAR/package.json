@@ -1,0 +1,42 @@
+{
+  "name": "ngram-ar",
+  "version": "1.0.0",
+  "private": true,
+  "description": "ngram AR — replaceable spatial bodies for persistent ngram entities",
+  "license": "MIT",
+  "keywords": [
+    "ai",
+    "agents",
+    "ngram",
+    "spatial",
+    "ar",
+    "mixed-reality",
+    "webxr",
+    "three.js",
+    "quest",
+    "embodiment",
+    "shells"
+  ],
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "lint": "turbo run lint",
+    "test": "npm run build && node --test tests/*.test.mjs",
+    "preview:spatial": "npm run build && node tests/serve-spatial-preview.mjs",
+    "clean": "turbo run clean",
+    "ngram-ar": "node packages/cli/dist/index.js",
+    "ngramar": "node packages/cli/dist/index.js dev shells/canary"
+  },
+  "devDependencies": {
+    "rimraf": "^6.1.3",
+    "turbo": "^2.4.0",
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "packageManager": "npm@10.9.0"
+}

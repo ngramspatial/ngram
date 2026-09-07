@@ -1,0 +1,19 @@
+# Example harness overlay: ngram runtime on Railway; inference via home gateway.
+# Set DATABASE_URL and NGRAM_INFERENCE_* env vars in Railway (see .env.example).
+
+deployment:
+  mode: hybrid_railway
+
+inference:
+  # remote_gateway (home tunnel) | openrouter | venice — hosted values use OPENROUTER_API_KEY / VENICE_API_KEY
+  provider: remote_gateway
+  base_url: "" # set via NGRAM_INFERENCE_BASE_URL in Railway
+  api_key_env: NGRAM_INFERENCE_GATEWAY_TOKEN
+  timeout: 120
+
+memory:
+  database_url: "" # prefer DATABASE_URL env on Railway (Postgres)
+
+attachments:
+  backend: object_s3_compat
+  prefix: ngram

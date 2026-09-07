@@ -1,0 +1,37 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+*.tsbuildinfo
+
+# Turbo
+.turbo/
+
+# Environment / secrets
+.env
+.env.local
+.env.*.local
+shells/*/.env
+
+# Certificates
+*.pem
+*.key
+*.crt
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# IDE
+.vscode/settings.json
+.idea/
+.cursor/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Raw asset downloads (processed versions live in shells/*/models/)
+chars/

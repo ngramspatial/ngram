@@ -1,0 +1,22 @@
+{
+  "name": "@ngram-ar/cli",
+  "version": "1.0.0",
+  "description": "CLI for ngram AR — init, dev, and manage spatial AI agents",
+  "type": "module",
+  "main": "./dist/index.js",
+  "bin": {
+    "ngram-ar": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "clean": "rimraf dist",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ngram-ar/core": "*",
+    "@ngram-ar/runtime": "*",
+    "@ngram-ar/gateway": "*"
+  },
+  "license": "MIT",
+  "keywords": ["ngram-ar", "spatial", "ai-agents"]
+}

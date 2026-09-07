@@ -1,0 +1,36 @@
+# Excluded from `railway up` archives (in addition to .gitignore). See https://docs.railway.com/cli/up
+# Reproducible deploys: image uses committed canary.example.yaml, not a personal canary.yaml.
+configs/entities/canary.yaml
+# ngram AR is in git but excluded from `railway up` archives — Python worker/API images do not need the Node monorepo.
+ngramAR/
+docs/
+website/
+
+# Credentials and personal runtime state must not enter deployment archives.
+.env
+.env.*
+**/.env
+**/.env.*
+.runtime/
+**/.runtime/
+.agents/
+.codex/
+.cloudflared/
+.railway/
+.vercel/
+**/.vercel/
+secrets/
+data/
+backups/
+exports/
+**/*.db
+**/*.sqlite
+**/*.sqlite3
+**/*.ngram
+**/*.pem
+**/*.key
+**/*.pfx
+**/*.p12
+ngramAR/shells/*/chats/
+ngramAR/shells/*/memory/
+**/models/private/

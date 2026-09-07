@@ -1,0 +1,59 @@
+# Slim build context (Railway / docker build). Keep in sync with local-only trees in .gitignore.
+# Never bake a developer's laptop-only canary.yaml; Dockerfile copies canary.example.yaml instead.
+configs/entities/canary.yaml
+# The Python Railway image does not bundle documentation, the website, or the local WebXR app.
+docs/
+website/
+ngramAR/
+
+.git
+.gitignore
+.dockerignore
+**/__pycache__
+**/*.py[cod]
+**/.pytest_cache
+.venv
+venv
+node_modules
+**/node_modules
+**/dist
+**/.turbo
+# Local troubleshooting captures must never enter a release or Railway image.
+image.png
+image copy.png
+*.egg-info
+.eggs
+dist
+htmlcov
+.coverage
+.mypy_cache
+.ruff_cache
+
+# Credentials and personal runtime state must not enter deployment archives.
+.env
+.env.*
+**/.env
+**/.env.*
+.runtime/
+**/.runtime/
+.agents/
+.codex/
+.cloudflared/
+.railway/
+.vercel/
+**/.vercel/
+secrets/
+data/
+backups/
+exports/
+**/*.db
+**/*.sqlite
+**/*.sqlite3
+**/*.ngram
+**/*.pem
+**/*.key
+**/*.pfx
+**/*.p12
+ngramAR/shells/*/chats/
+ngramAR/shells/*/memory/
+**/models/private/

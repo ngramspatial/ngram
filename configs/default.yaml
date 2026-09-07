@@ -1,0 +1,435 @@
+# ngram harness defaults (tracked — every clone gets this file).
+# Entity-specific overrides go in configs/entities/<name>.yaml
+#
+# Deployment / inference (see .env.example and NGRAM_* vars)
+# "local" here is the repo default for a fresh clone (Ollama on one machine). Hybrid is selected
+# at runtime when NGRAM_DEPLOYMENT_MODE=hybrid_railway (e.g. .env after setup, or Railway) —
+# that env value overrides this file (see apply_harness_env_overrides in ngram/config.py).
+deployment:
+  mode: local # local | hybrid_railway — overridden by NGRAM_DEPLOYMENT_MODE when set
+
+inference:
+  provider: "" # local | remote_gateway | hosted preset | custom — empty derives from deployment.mode
+  base_url: "" # gateway root or complete custom API prefix; empty uses ollama/provider defaults
+  api_key_env: NGRAM_INFERENCE_GATEWAY_TOKEN
+  model: ""
+  timeout: 120
+  # Ollama OpenAI /v1/chat/completions: send options.num_ctx from entity cognition.max_context_tokens
+  pass_num_ctx: true
+
+attachments:
+  backend: local_disk # local_disk | object_s3_compat
+  local_dir: "~/.ngram/entities/{entity_name}/attachments"
+  endpoint_url_env: NGRAM_S3_ENDPOINT_URL
+  bucket_env: NGRAM_S3_BUCKET
+  access_key_env: NGRAM_S3_ACCESS_KEY
+  secret_key_env: NGRAM_S3_SECRET_KEY
+  prefix: ngram
+
+ollama:
+  base_url: "http://localhost:11434"
+  timeout: 120
+  retry_attempts: 3
+  retry_delay: 2.0
+
+models:
+  reflex: "gemma4:26b"
+  deliberate: "gemma4:26b"
+  embedding: "nomic-embed-text"
+
+cognition:
+  thinking_mode: true
+  temperature: 0.75
+  reflex_max_tokens: 1024
+  deliberate_max_tokens: 16384
+  thinking_budget: 2048
+  max_context_tokens: 16384
+  escalation_threshold: 0.4
+  image_token_budget: 280
+  # Nudge the model when it describes a tool step but returns no tool_calls (multi-step tasks).
+  tool_continuation_rounds: 21
+
+  # Entity YAML ``cognition.rolling_history_max_messages`` (default 200): max user+assistant pairs
+  # kept in rolling chat before oldest turns drop to the summary / compaction path.
+
+  # History compression and proactive context compaction.
+  # The compaction system fires *before* inference when estimated tokens approach the context
+  # limit, summarizing middle turns while protecting head (first exchange) and tail (recent).
+  # The message-count trim (rolling_history_max_messages on the entity) remains as a safety net.
+  # history_compression:
+  #   enabled: true
+  #   compaction_threshold_ratio: 0.6    # trigger at this fraction of max_context_tokens
+  #   compaction_target_ratio: 0.08      # tail token budget = threshold * this
+  #   compaction_protect_last_n: 12      # minimum protected tail messages
+  #   compaction_protect_first_n: 2      # protected head messages (first exchange)
+  #   compaction_max_passes: 3           # max compression passes per pre-flight
+  #   compaction_flush_to_knowledge: true # extract durable facts to knowledge.md before compacting
+
+identity:
+  emotion_decay_rate: 0.001
+  drive_tick_interval: 120
+  evolution_interval: 100
+  narrative_interval: 500
+
+memory:
+  database_path: "~/.ngram/entities/{entity_name}/memory.db"
+  database_url: "" # postgresql://... when set (or use DATABASE_URL); empty = SQLite file above
+  episode_significance_threshold: 0.3
+  consolidation_interval: 7200
+  memory_decay_rate: 0.0001
+  max_recall_results: 10
+  embedding_dimensions: 768
+  narrative_every_n_consolidations: 3
+  imprint_decay_half_life_seconds: 2592000
+  imprint_recall_weight: 0.35
+  # LLM-maintained prose relationship portraits (see ngram/memory/relational_document.py).
+  relational:
+    enabled: true
+    reflection_temperature: 0.4
+    reflection_max_tokens: 800
+    reflection_min_gap_seconds: 30
+    score_derivation: true
+    flush_to_disk: true
+    max_context_tokens: 800
+    deep_review_on_consolidation: true
+    amendment_mode_threshold: 0.3
+    deep_review_min_new_interactions: 3
+    deep_review_max_tokens: 1200
+    gen_recent_hours: 24
+    gen_tail_sentences: 3
+
+presence:
+  heartbeat_interval: 120
+  initiative_cooldown: 1800
+  typing_speed_base: 30
+  typing_speed_variance: 0.3
+  message_chunk_max: 400
+  chunk_delay: 2.0
+
+logging:
+  level: "INFO"
+  file: "~/.ngram/entities/{entity_name}/ngram.log"
+  format: "json"
+
+# Optional: Firecrawl (https://firecrawl.dev) — Bearer key in env. When set, preferred for
+# fetch_url (scrape) and search_web (search). Entity YAML can override with top-level ``firecrawl:``.
+firecrawl:
+  api_key_env: "FIRECRAWL_API_KEY"
+  base_url: "https://api.firecrawl.dev/v1"
+  prefer_for_fetch: true
+  prefer_for_search: true
+
+# Tonic body state — continuous internal drives, affects, and impulses.
+# The agent reads its body state each turn; it cannot set it directly.
+soma:
+  enabled: true
+  bars:
+    variables:
+      - name: social
+        initial: 50
+        decay_rate: -15.0
+        floor: 0
+        ceiling: 100
+      # Epistemic appetite — not "chat is happening". Stronger decay + no flat receive bump;
+      # curiosity moves from appraisal (content) and tool/action events, not from every message.
+      - name: curiosity
+        initial: 45
+        decay_rate: -22.0
+        decay_time_scale: 0.88
+        floor: 0
+        ceiling: 100
+      - name: creative
+        initial: 40
+        decay_rate: -12.0
+        floor: 0
+        ceiling: 100
+      - name: tension
+        initial: 15
+        decay_rate: -6.0
+        floor: 0
+        ceiling: 100
+      - name: comfort
+        initial: 65
+        decay_rate: -3.0
+        floor: 0
+        ceiling: 100
+    momentum_window: 6
+  coupling:
+    - when: "social > 80"
+      effect: "curiosity.decay_rate *= 1.5"
+    - when: "tension > 70"
+      effect: "comfort.decay_rate *= 2.0"
+    # When curiosity is already saturated, pull homeostasis a bit harder so it can breathe.
+    - when: "curiosity > 82"
+      effect: "curiosity.decay_rate *= 1.25"
+  event_effects:
+    # No automatic curiosity on receive — somatic appraisal decides if the *content* warrants it.
+    message_received: { social: 2 }
+    message_sent: { social: 1, creative: 0.5 }
+    action: { curiosity: 1 }
+    idle: { social: -0.015, curiosity: -0.008 }
+    idle_cycle: { comfort: 3, tension: -2 }
+    mood_declared: { comfort: 1 }
+  impulses:
+    - drive: social
+      threshold: 80
+      type: reach_out
+      label: reach_out
+      cooldown_minutes: 30
+      relief: { social: -25 }
+    - drive: curiosity
+      threshold: 88
+      type: explore
+      label: explore_something
+      cooldown_minutes: 20
+      relief: { curiosity: -22 }
+  conflicts:
+    - drives: [curiosity, comfort]
+      threshold: 70
+      label: "restless comfort"
+      tension_per_tick: 0.08
+      tension_ceiling: 65
+      comfort_per_tick: -0.15
+  # Somatic appraisal — fast LLM pass that reads message content and translates
+  # it into dynamic bar effects. Curiosity is *not* raised for routine chat; see prompts in code.
+  # Replaces the flat "message_received → social +3" with content-aware signal.
+  appraisal:
+    enabled: true
+    temperature: 0.3
+    max_tokens: 160
+    # json (default) or lines — JSON is easier to parse reliably.
+    output_format: json
+    calibration_log: false   # if true, logs hashed message keys + effects for tuning
+  affect_cycle_seconds: 240
+  # Generative entropic noise — a small model producing continuous inner voice.
+  # The entity reads this as its own stream of consciousness.
+  noise:
+    enabled: true
+    model: ""  # empty uses reflex model; set to e.g. "gemma3:1b" for a dedicated small noise model
+    cycle_seconds: 90
+    temperature: 0.88
+    max_tokens: 240
+    max_fragments: 8
+    # coherent GEN ticks in a row that ask for thematic continuity (0 = off).
+    thematic_streak_max: 3
+    semantic_dedup: false
+    semantic_similarity_threshold: 0.82
+    semantic_dedup_retries: 2
+  # Exogenous seeds for GEN — optional; see ngram.identity.noise_seeder
+  noise_seeder:
+    enabled: false
+    cycle_seconds: 90
+    source_weights:
+      episodic_random: 0.25
+      belief_random: 0.10
+      knowledge_random: 0.10
+      world_discovery: 0.25
+      relationship_echo: 0.10
+      journal_echo: 0.10
+      temporal: 0.10
+    world_discovery:
+      concepts_path: "configs/noise_seeds/concepts.txt"
+      allow_external_fetch: false
+      external_fetch_probability: 0.1
+    recency_suppression_window: 3
+    max_resample_attempts: 3
+    episodic_random:
+      min_age_hours: 24
+    belief_random:
+      min_age_hours: 12
+    relationship_echo:
+      min_silence_hours: 48
+    journal_echo:
+      min_age_days: 3
+  # Subconscious wake voice — generates the prompt for autonomous wake cycles.
+  # Fires only when a wake condition is met. Reads the full body state + memory
+  # and composes a first-person stirring that the conscious agent receives on wake.
+  wake_voice:
+    enabled: true
+    model: ""  # empty uses reflex model
+    temperature: 0.8
+    max_tokens: 300
+  # Dream consolidation — offline memory recombination during long idle.
+  # Pulls temporally distant episodic memories and creatively recombines
+  # them, writing results as low-confidence beliefs, journal entries,
+  # and [dream]-tagged GEN fragments.
+  dreams:
+    enabled: false               # opt-in (LLM calls during idle)
+    model: ""                    # empty uses reflex model
+    temperature: 1.15            # high temp for surreal/creative output
+    max_tokens: 500              # room for 3-6 dream fragments
+    min_silence_seconds: 3600    # must be idle this long before dreaming
+    min_gap_seconds: 14400       # minimum 4 hours between dream cycles
+    max_cycles_per_day: 2        # hard cap
+    dream_hours: [0, 1, 2, 3, 4, 5]  # circadian window (local time hours)
+    # Memory selection
+    memory_pair_count: 3         # how many distant pairs to dream about
+    min_time_gap_hours: 24       # memories must be at least this far apart
+    max_similarity: 0.35         # cosine sim ceiling (lower = more dissimilar)
+    # Output routing
+    write_journal: true          # write dream summary to journal.md
+    write_beliefs: true          # extract novel connections as low-confidence beliefs
+    belief_confidence: 0.35      # confidence for dream-derived beliefs
+    inject_noise: true           # push [dream] fragments into GEN buffer
+    max_noise_fragments: 2       # cap on dream fragments injected into noise
+  # Ebb — scale how much body + GEN appears in the prompt (continuous state, bursty salience).
+  ebb:
+    enabled: true
+    weights:
+      bar_deviation: 0.38
+      conflict: 0.22
+      impulse: 0.18
+      affect_load: 0.12
+      noise_fill: 0.10
+    quiet_below: 0.30      # salience below this → quiet tier (minimal body/GEN in prompt)
+    high_above: 0.58       # salience at or above → full body layout
+    reflex_salience_scale: 0.75   # reflex routes feel quieter before tier mapping
+    autonomous_minimum: normal    # floor for autonomous/automation turns: quiet | normal | high
+    quiet_max_noise_lines: 1
+    normal_max_noise_lines: 3
+    high_max_noise_lines: 4       # 0 = default to 4
+    skip_post_turn_noise_when_quiet: true   # skip GEN tick after turn when tier is quiet
+    # Optional preset: calm | reactive | expressive — sets ebb weights/thresholds (YAML overrides win).
+    personality: ""
+    debug_salience: false   # log weighted salience components per turn
+  observability:
+    metrics_log: false      # structured soma_metrics log line (salience breakdown)
+    timeline_enabled: false # append one line per turn to soma_timeline.md under soma dir
+    timeline_filename: soma_timeline.md
+    timeline_max_bytes: 65536
+
+# Autonomous wake cycles — the entity wakes on its own, driven by body state.
+autonomy:
+  enabled: true
+  min_cycle_gap_seconds: 600       # minimum time between autonomous cycles
+  max_cycles_per_hour: 4
+  messages_per_cycle: 2            # hard cap on outgoing messages per autonomous cycle
+  base_wake_interval_min: 20       # randomized fallback timer range (minutes)
+  base_wake_interval_max: 45
+  # Extra delay before the next timer wake when the previous wake started recently (clustered wakes).
+  # Scales down as the gap between wake starts grows; 0 disables.
+  wake_spacing_extra_minutes_max: 45
+  wake_spacing_gap_hours_tau: 3.0   # hours — e-folding time for that extra delay
+  silence_threshold_seconds: 120   # don't wake during active conversation
+  # Variety: stochastic intents, flavored reasons, richer desires, wake-voice variants, anti-rut / anti–groundhog prompts
+  wake_entropy_score_noise: 0.28
+  wake_intent_softmax_temperature: 0.52
+  wake_rut_episode_window: 14
+  wake_rut_word_repeat_threshold: 3
+  wake_entropy_desire_extras: 2
+  wake_voice_variant_roll: true
+  wake_voice_temperature_jitter: 0.12
+  wake_reason_flavor: true
+  wake_anti_groundhog_prompt: true
+  impulse_wake: true               # wake when soma impulses fire
+  drive_wake: true                 # wake when drives cross threshold
+  conflict_wake: true              # wake on active soma conflicts
+  noise_wake: false                # wake on unresolved noise fragments (experimental)
+  noise_wake_min_salience: 0.44    # body must be this “loud” before noise can wake
+  noise_wake_min_age_seconds: 90   # GEN must be idle this long (mature inner voice, not fresh tick)
+  desire_wake: true                # wake when synthesized desire pressure is strong
+  desire_wake_threshold: 0.72      # 0..1 urgency threshold for desire-triggered wake
+  max_desires_considered: 3        # how many top desire pressures to surface in wake context
+  allow_tool_calls_on_wake: true   # if true, wake cycles may use tools to explore/act
+  # Sustained wake: chain multiple full perceive() rounds per trigger (keep working).
+  wake_session_max_rounds: 1        # ceiling only — agent may end_wake_session() anytime; 1 = single round
+  wake_session_wall_seconds: 1200  # hard cap on wall time per wake trigger (~20 min)
+  wake_session_say_budget_per_round: 6   # say() cap per round when max_rounds > 1
+  wake_session_pause_seconds: 2.0 # pause between rounds (lets I/O settle)
+  wake_session_extra_tool_steps: 10 # extra agent-loop steps per round when max_rounds > 1
+  wake_wide_mode: false              # broader tool budget + freedom prompt during wakes
+  wake_wide_bonus_steps: 16          # added to agent loop when wake_wide_mode
+  wake_user_visible_status: true    # mirror wake status lines to Telegram; false = file only (see transcript); /wakequiet on overrides to transcript-only
+  wake_verbose_worker_log: true     # multi-line banner in worker logs (soma, GEN, poker)
+  # Full autonomous detail on disk (beside journal / workspace) — keeps Telegram quiet when chat flags are false
+  transcript_enabled: true
+  transcript_filename: autonomy_transcript.md
+  transcript_path: ""                 # optional override path (absolute or relative to workspace / entity dir)
+  wake_chat_tool_activity: true       # mirror per-tool lines to Telegram during autonomous wake
+  # Optional internal disposition prompts — large bundled deck in configs/poker_prompts/default.yaml
+  poker_prompts:
+    enabled: false
+    time_weighted: true
+    mode: blend              # blend | replace_wake_voice (latter skips LLM wake stirring)
+    prompts_path: ""        # empty = bundled default; or e.g. poker_prompts/custom.yaml under configs/
+    # Fuse deck seed with GEN (noise) + soma context — emergent nudge, not a fixed script
+    ground_with_gen: true
+    grounding_model: ""      # empty = reflex model
+    grounding_temperature: 0.72
+    grounding_max_tokens: 300
+  summon:
+    enabled: true
+    timeout_seconds: 30
+
+tools:
+  shell:
+    enabled: true
+    # No bare "format" substring — it matched inside words like "information" (see shell tool).
+    deny: ["rm -rf /", "sudo rm", "shutdown", "reboot", "mkfs", "dd if="]
+    timeout: 30
+  browser:
+    enabled: false
+  remote_session:
+    enabled: false
+    refresh_seconds: 2.5
+    max_idle_seconds: 900
+    require_operator: true
+  code:
+    enabled: true
+    timeout: 30
+  imagegen:
+    enabled: false
+    backend: "fal" # fal | local
+    fal_api_key_env: "FAL_API_KEY"
+    local_url: "" # e.g. http://127.0.0.1:7860/sdapi/v1/txt2img
+  voice:
+    enabled: true
+    voice_id: "en-US-GuyNeural"
+  youtube:
+    enabled: true
+  reddit:
+    enabled: true
+  pdf:
+    enabled: true
+  reminders:
+    enabled: true
+  messaging:
+    enabled: true
+  wikipedia:
+    enabled: true
+  weather:
+    enabled: true
+  news:
+    enabled: true
+  memory_search:
+    enabled: true
+  patch:
+    enabled: true
+  session_todos:
+    enabled: true
+  clarify:
+    enabled: true
+  delegation:
+    enabled: true
+  system:
+    enabled: true
+  execution:
+    base_url: "" # Optional remote hands endpoint
+    token_env: "NGRAM_EXECUTION_RPC_TOKEN"
+    timeout: 45
+    allow_local: false
+    require_railway: false
+    workspace_dir: ""
+    rpc_path: "/rpc"
+  iot:
+    enabled: true
+    url_env: "HOME_ASSISTANT_URL"
+    token_env: "HOME_ASSISTANT_TOKEN"
+  social:
+    enabled: true
+    mastodon_url_env: "MASTODON_URL"
+    mastodon_token_env: "MASTODON_ACCESS_TOKEN"
+  observation:
+    enabled: true
+  rag:
+    enabled: true

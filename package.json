@@ -1,0 +1,19 @@
+{
+  "name": "ngram-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Persistent agents with memory, relationships, tools, and replaceable AR bodies.",
+  "scripts": {
+    "ar:install": "npm --prefix ngramAR install",
+    "ar:build": "npm --prefix ngramAR run build",
+    "ar:lint": "npm --prefix ngramAR run lint",
+    "ar:test": "npm --prefix ngramAR test",
+    "ar:dev": "npm --prefix ngramAR run ngram-ar -- dev",
+    "ar:setup": "npm --prefix ngramAR run ngram-ar -- setup",
+    "deploy:canary": "railway up -d -s ngram-worker && railway up -d -s ngram-api",
+    "ollama:reset": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\ollama-reset.ps1"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}

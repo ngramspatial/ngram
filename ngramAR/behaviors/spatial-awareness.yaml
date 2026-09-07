@@ -1,0 +1,63 @@
+name: Spatial Awareness
+description: >
+  Core spatial awareness behaviors. Gives agents the ability to perceive
+  and respond to their physical environment autonomously.
+
+behaviors:
+  - id: proximity-acknowledge
+    description: Acknowledges when a user lingers nearby
+    trigger:
+      type: proximity
+      params:
+        distance: 1.5
+        duration: 5.0
+    priority: 5
+    cooldown: 60
+    mode: deliberative
+    prompt: >
+      The user has been standing close to you for several seconds.
+      You might want to acknowledge their presence naturally — a brief
+      greeting, a glance, or a subtle gesture. Keep it short and organic.
+
+  - id: idle-wander
+    description: Occasionally repositions when idle for a while
+    trigger:
+      type: idle_timeout
+      params:
+        seconds: 45
+    priority: 1
+    cooldown: 30
+    mode: reflexive
+    action:
+      type: action:move_to
+      params:
+        target: random
+        speed: walk
+
+  - id: gaze-acknowledge
+    description: Looks back when the user stares
+    trigger:
+      type: gaze
+      params:
+        duration: 3.0
+        angle: 0.85
+    priority: 3
+    cooldown: 15
+    mode: reactive
+    action:
+      type: action:look_at
+      params:
+        target: user
+
+  - id: scene-curiosity
+    description: Notices and comments on new objects in the scene
+    trigger:
+      type: scene_change
+      params: {}
+    priority: 4
+    cooldown: 30
+    mode: deliberative
+    prompt: >
+      Something in your environment has changed — a new object or surface
+      has appeared in the scene. You might want to glance at it or make
+      a brief, curious observation. Don't overreact.

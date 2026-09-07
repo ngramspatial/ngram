@@ -1,0 +1,22 @@
+{
+  "name": "@ngram-ar/bindings",
+  "version": "1.0.0",
+  "description": "Bindings that connect ngram AR shells to persistent ngram entities",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "clean": "rimraf dist",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ngram-ar/core": "*",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.5.13"
+  },
+  "license": "MIT",
+  "keywords": ["ngram-ar", "spatial", "ai-agents"]
+}

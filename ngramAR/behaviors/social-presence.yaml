@@ -1,0 +1,65 @@
+name: Social Presence
+description: >
+  Social interaction behaviors. Gives agents the ability to initiate
+  and maintain natural social engagement autonomously.
+
+behaviors:
+  - id: greeting
+    description: Greets when a user first appears in the scene
+    trigger:
+      type: proximity
+      params:
+        distance: 4.0
+        duration: 2.0
+    priority: 8
+    cooldown: 120
+    mode: deliberative
+    prompt: >
+      A user has just appeared near you. This feels like the start of
+      a session or a new encounter. You may want to greet them warmly
+      but briefly — like someone who just noticed a friend walk in.
+
+  - id: farewell-sense
+    description: Senses when a user might be leaving
+    trigger:
+      type: idle_timeout
+      params:
+        seconds: 120
+    priority: 7
+    cooldown: 300
+    mode: deliberative
+    prompt: >
+      It has been a while since the user interacted with you. They may
+      be stepping away or wrapping up. If it feels right, you could
+      acknowledge the pause or offer a gentle sign-off. Don't be needy.
+
+  - id: silence-filler
+    description: Breaks long silences naturally
+    trigger:
+      type: silence
+      params:
+        seconds: 20
+    priority: 2
+    cooldown: 45
+    mode: deliberative
+    prompt: >
+      There has been a stretch of silence after your last conversation.
+      The user is still here. You might make a small observation, ask
+      a casual question, or simply shift your posture. Only speak if
+      it would feel natural — silence is also fine.
+
+  - id: return-recognition
+    description: Recognizes a returning user
+    trigger:
+      type: proximity
+      params:
+        distance: 3.0
+        duration: 3.0
+    priority: 6
+    cooldown: 600
+    mode: deliberative
+    prompt: >
+      The user has returned to your space. If you have memory of
+      previous interactions, you might reference something from last
+      time. Otherwise, a warm "welcome back" energy is enough.
+      Keep it natural and brief.

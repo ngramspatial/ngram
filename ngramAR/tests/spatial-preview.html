@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ngram · Spatial review</title>
+<link rel="stylesheet" href="/fonts/azeret-mono.css">
+<style>
+*{box-sizing:border-box}body{margin:0;background:#eef0f8;color:#152064;font:13px 'Azeret Mono',monospace;letter-spacing:-.035em}
+header{display:flex;align-items:center;justify-content:space-between;padding:20px 28px;background:#6e7dff;color:white}h1{font-size:21px;letter-spacing:-.06em;margin:0}header span{font-size:11px}
+nav{display:flex;gap:8px;flex-wrap:wrap;padding:16px 28px;border-bottom:1px solid #ccd2ed}button{font:inherit;padding:10px 15px;border:1px solid #a1acd5;background:white;color:#152064;cursor:pointer}button:hover,button[aria-pressed=true]{background:#152064;color:white}button:focus-visible{outline:3px solid #6e7dff}
+main{padding:24px 28px}#stage{height:540px;position:relative;overflow:hidden;border:1px solid #a1acd5;border-radius:10px}#stage canvas{display:block;width:100%;height:100%}#result{padding:16px 0;color:#152064}#sheets{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:22px}figure{margin:0;padding:20px;background:#e0e4f2;border:1px solid #bac3e1;border-radius:8px}figure canvas{display:block;width:100%;height:auto}figcaption{margin:0 0 16px;font-size:11px;text-transform:uppercase;letter-spacing:.08em}#checks{white-space:pre-wrap;line-height:1.8;background:white;padding:24px}a{color:inherit}
+@media(max-width:900px){#sheets{grid-template-columns:1fr 1fr}header{gap:20px}}@media(max-width:600px){#sheets{grid-template-columns:1fr}}
+</style>
+<header><h1>ngram / spatial review</h1><span>Production XR components · local fixture</span></header>
+<nav aria-label="Review scenes">
+<button data-view="help" aria-pressed="true">Welcome</button><button data-view="radial" aria-pressed="false">Controller menu</button><button data-view="wrist" aria-pressed="false">Wrist menu</button><button data-view="conversation" aria-pressed="false">Conversation</button><button data-view="microphone" aria-pressed="false">Microphone</button><button data-view="panels" aria-pressed="false">Content panels</button><button id="backdrop">Dark backdrop</button><button id="select">Next selection</button><button id="recording" aria-pressed="false">Simulate recording</button>
+</nav>
+<main><div id="stage"></div><div id="result" role="status">Loading brand assets…</div><div id="sheets"></div><h2>Runtime checks</h2><pre id="checks">Running…</pre><a href="/">Open desktop UI</a></main>
+<script type="module" src="/spatial-preview.js"></script>
+</html>

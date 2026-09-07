@@ -1,0 +1,92 @@
+.env
+.env.*
+!.env.example
+.runtime/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# uv / virtualenv
+.venv/
+venv/
+ENV/
+
+# Local Canary overlay — copy from configs/entities/canary.example.yaml (see README). Docker copies example → canary in the image.
+configs/entities/canary.yaml
+
+# Local databases / entity state
+*.db
+*.sqlite
+*.sqlite3
+
+# Node
+node_modules/
+.vercel/
+ngramAR/shells/*/chats/
+ngramAR/shells/*/memory/
+ngramAR/shells/*/models/private/
+
+# Certificates / keys
+*.pem
+*.key
+*.pfx
+*.p12
+
+# Logs
+*.log
+
+# Secrets catch-all
+secrets/
+
+# direnv
+.envrc
+
+# IDE / OS
+.cursor/
+.claude/
+.cursorrules
+# Local models / raw assets
+shanghai/
+blackdress/
+
+
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Personal runtime state and deployment linkage
+.agents/
+.codex/
+.cloudflared/
+.railway/
+.ngram/
+/data/
+/backups/
+/exports/
+*.ngram
+*.sqlite-wal
+*.sqlite-shm
+*.db-wal
+*.db-shm
+*.ngram.gz
+*.ngram.zip
+
+# Local documentation workspace
+/docs/
+
+# Local product website
+/website/

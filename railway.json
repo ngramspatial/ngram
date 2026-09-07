@@ -1,0 +1,9 @@
+{
+  "$schema": "https://railway.com/railway.schema.json",
+  "build": {
+    "buildCommand": "pip install '.[railway,api,full]'"
+  },
+  "deploy": {
+    "startCommand": "/bin/sh -c 'if [ \"$NGRAM_RAILWAY_ROLE\" = \"api\" ]; then exec /app/docker/entrypoint-railway.sh -m ngram.main api --host 0.0.0.0 --port \"${PORT:-8080}\"; elif [ \"$NGRAM_RAILWAY_ROLE\" = \"hands\" ]; then exec /app/docker/entrypoint-railway.sh -m ngram.main hands --host 0.0.0.0 --port \"${PORT:-8080}\"; elif [ -n \"$NGRAM_ENTITY\" ]; then exec /app/docker/entrypoint-railway.sh -m ngram.main worker \"$NGRAM_ENTITY\"; else echo \"Railway: set NGRAM_RAILWAY_ROLE=api or hands, or set NGRAM_ENTITY for the worker.\" >&2; exit 1; fi'"
+  }
+}

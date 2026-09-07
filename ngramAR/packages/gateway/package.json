@@ -1,0 +1,24 @@
+{
+  "name": "@ngram-ar/gateway",
+  "version": "1.0.0",
+  "description": "WebSocket gateway for ngram AR — routes between agent bindings and shell surfaces",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "clean": "rimraf dist",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ngram-ar/bindings": "*",
+    "@ngram-ar/core": "*",
+    "@ngram-ar/runtime": "*",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.5.0"
+  },
+  "license": "MIT",
+  "keywords": ["ngram-ar", "spatial", "ai-agents"]
+}

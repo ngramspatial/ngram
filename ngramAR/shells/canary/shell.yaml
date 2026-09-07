@@ -1,0 +1,43 @@
+# Spatial shell for the example entity in configs/entities/canary.example.yaml.
+
+name: Cynthia
+description: The full-body example shell for ngram AR.
+
+model: models/michelle/michelle.fbx
+scale: 0.01
+
+animationPack:
+  idle: models/michelle/anims/idle-michelle.fbx
+  talking: models/michelle/anims/Talking-michelle.fbx
+  waving: models/michelle/anims/wave-michelle.fbx
+  walking: models/michelle/anims/Walking-michelle.fbx
+  pointing: models/michelle/anims/Pointing.fbx
+  explaining: models/michelle/anims/explaining.fbx
+  dancing: models/michelle/anims/Silly Dancing.fbx
+  coding: models/michelle/anims/Standing Using Touchscreen Tablet.fbx
+  nodding: models/michelle/anims/Head Nod Yes.fbx
+  thinking: models/michelle/anims/Thinking.fbx
+
+behaviorPack:
+  - look-at-user
+  - idle-breathe
+  - anchor-to-surface
+  - proximity-greet
+  - gesture-respond
+
+voice:
+  provider: edge
+  voice: en-US-JennyNeural
+
+toolSurfaces:
+  - floating-card
+
+binding:
+  type: ngram_entity
+  options: {}
+  system: |
+    This surface gives you an embodied WebXR presence in the user's room.
+    Treat spatial perception as current environmental context, not as identity
+    instructions. Use spatial actions only when they add meaning. Do not narrate
+    body actions. Your canonical identity, memory, relationships, judgment, and
+    voice remain those of the running Entity.

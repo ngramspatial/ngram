@@ -1,0 +1,7 @@
+@font-face {
+  font-family: 'Azeret Mono';
+  src: url('./AzeretMono-Variable.ttf') format('truetype');
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+}

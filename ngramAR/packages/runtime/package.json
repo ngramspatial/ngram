@@ -1,0 +1,19 @@
+{
+  "name": "@ngram-ar/runtime",
+  "version": "1.0.0",
+  "description": "Shell runtime for ngram AR — loads shells, manages voice and memory",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "clean": "rimraf dist",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ngram-ar/core": "*",
+    "edge-tts-universal": "^1.4.0"
+  },
+  "license": "MIT",
+  "keywords": ["ngram-ar", "spatial", "ai-agents"]
+}

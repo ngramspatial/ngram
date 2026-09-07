@@ -1,0 +1,38 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          python-version: "3.11"
+          enable-cache: true
+      - run: uv sync --extra dev
+      - run: uv run ruff check ngram tests
+      - run: uv run pytest
+
+  webxr:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ngramAR
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ngramAR/package-lock.json
+      - run: npm ci
+      - run: npm run build
+      - run: npm run lint
+      - run: node --test tests/*.test.mjs

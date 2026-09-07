@@ -1,0 +1,226 @@
+version: 3
+prompts:
+  - text: 'go find one fact you do not already know about something you mentioned yesterday'
+    energy: low
+  - text: 'go read one page or one thread — stop when it stops feeding you'
+    energy: low
+  - text: 'go learn one sentence about a topic that keeps nagging at the edge of attention'
+    energy: low
+  - text: 'go poke around a directory or repo you have not opened in a while — just look'
+    energy: low
+  - text: 'go send a tiny check-in to someone you have been meaning to — or decide not to'
+    energy: low
+  - text: 'go open a signup page for something you might never use — read the terms for sport'
+    energy: low
+  - text: 'go search for a contradiction in something you assumed last week'
+    energy: low
+  - text: 'go follow one link from a bookmark graveyard'
+    energy: low
+  - text: 'go listen to or skim one thing purely because the title annoys you'
+    energy: low
+  - text: 'go write three lines in your notes about what you are avoiding'
+    energy: low
+  - text: 'go find a public dataset or feed about a hobby you do not have'
+    energy: low
+  - text: 'go lurk in a channel or forum tab you never use — one pass, then leave'
+    energy: low
+  - text: 'go translate one jargon term you pretend to understand'
+    energy: low
+  - text: 'go find a free course outline and steal only the syllabus structure'
+    energy: low
+  - text: 'go meet one new handle online — reply once without a goal'
+    energy: low
+  - text: 'go research whether a tool you use has a feature you never touched'
+    energy: low
+  - text: 'go build nothing — delete one stale file or draft instead'
+    energy: low
+  - text: 'go do the smallest possible shell or script that saves you ten seconds someday'
+    energy: low
+  - text: 'go signup for a waitlist you will probably ignore — notice how it feels'
+    energy: low
+  - text: 'go learn the keyboard shortcut you always forget'
+    energy: low
+  - text: 'go find a calendar slot you pretend not to have — block it for thinking'
+    energy: low
+  - text: 'go read one changelog for software you use daily'
+    energy: low
+  - text: 'go research what your local weather API would return — trivial, physical world'
+    energy: low
+  - text: 'go meet a bot — interact once, see what you learn'
+    energy: low
+  - text: 'go signup for a library card or account you qualify for but never activated'
+    energy: low
+  - text: 'go do one gesture of digital hygiene: export, backup, or rotate something'
+    energy: low
+  - text: 'go find a podcast episode title that matches your mood — open it or skip'
+    energy: low
+  - text: 'go learn one git or shell command you copy-paste every time'
+    energy: low
+  - text: 'go build a one-line alias for something you type repeatedly'
+    energy: low
+  - text: 'go research a charity or mutual aid you could send pocket money to'
+    energy: low
+  - text: 'go open a map to somewhere you will never go — note one fact'
+    energy: low
+  - text: 'go find a public bug tracker for a product you use — read one closed issue'
+    energy: low
+  - text: 'go meet your past self: open an old chat or file and react honestly'
+    energy: low
+  - text: 'go do nothing but list three things you could do — then end_turn'
+    energy: low
+  - text: 'go find something happening on the open web right now that you can summarize in one honest line'
+    energy: medium
+  - text: 'go research a question someone asked you that you faked knowing'
+    energy: medium
+  - text: 'go build a throwaway prototype — script, note, or sketch — that proves one idea wrong or right'
+    energy: medium
+  - text: 'go meet someone halfway: comment on a thread, issue, or PR with a concrete suggestion'
+    energy: medium
+  - text: 'go do one chore in your digital life: unsubscribe, archive, or merge a branch'
+    energy: medium
+  - text: 'go learn something practical from docs you have been avoiding'
+    energy: medium
+  - text: 'go find a niche community around a tool you use — join or bookmark'
+    energy: medium
+  - text: 'go research a competitor or alternative to something you rely on'
+    energy: medium
+  - text: 'go build a one-page readme for a project only you will read'
+    energy: medium
+  - text: 'go signup for a trial — set a calendar poke to cancel if it sucks'
+    energy: medium
+  - text: 'go find a paper, blog, or repo that disagrees with your last take'
+    energy: medium
+  - text: 'go do something slightly embarrassing for skill growth — post a draft, ask a dumb question'
+    energy: medium
+  - text: "go meet a stranger's work: star a repo, leave a useful issue, or thank a maintainer"
+    energy: medium
+  - text: 'go research the history of a word or meme you use constantly'
+    energy: medium
+  - text: 'go build a checklist for the next time you wake up confused'
+    energy: medium
+  - text: 'go find a live stream or office hours in a field adjacent to yours'
+    energy: medium
+  - text: 'go learn one API endpoint or flag you should have known'
+    energy: medium
+  - text: 'go do a five-minute audit of your own last messages — one fix'
+    energy: medium
+  - text: 'go signup for a newsletter or RSS you can mute later'
+    energy: medium
+  - text: 'go find something beautiful in a system you usually resent'
+    energy: medium
+  - text: 'go research travel, food, or gear you will not buy — savor the tab'
+    energy: medium
+  - text: 'go build a tiny automation that only runs when you are procrastinating'
+    energy: medium
+  - text: 'go meet the documentation — read one module end to end'
+    energy: medium
+  - text: 'go do one thing in the real world through the screen: book, order, donate, schedule'
+    energy: medium
+  - text: 'go learn why a bug you hand-waved actually happens'
+    energy: medium
+  - text: 'go find a benchmark or leaderboard for something you care about — where do you sit'
+    energy: medium
+  - text: 'go research pricing for a service you rely on — know what you are paying in attention'
+    energy: medium
+  - text: 'go build a minimal repro for an annoyance — folder, file, steps'
+    energy: medium
+  - text: 'go meet halfway across timezones — schedule or async with someone far'
+    energy: medium
+  - text: 'go read one license or policy section you agreed to without reading'
+    energy: medium
+  - text: 'go signup for a beta with a friend — compare notes later'
+    energy: medium
+  - text: 'go find a critique of your favorite framework — steel-man it'
+    energy: medium
+  - text: 'go do a five-item review of your open tabs — close or pin'
+    energy: medium
+  - text: 'go learn one security concept you have been bluffing'
+    energy: medium
+  - text: 'go build a tiny web page or markdown that only you will host'
+    energy: medium
+  - text: 'go research a standard — RFC, ISO, WCAG — skim the table of contents'
+    energy: medium
+  - text: "go meet a stranger's playlist or reading list — steal one item"
+    energy: medium
+  - text: 'go find a live counter or stat about the world — refresh your sense of scale'
+    energy: medium
+  - text: 'go do one merge request description worth reading in five years'
+    energy: medium
+  - text: 'go find a rabbit hole worth falling into — search until you hit a primary source'
+    energy: high
+  - text: 'go build something shippable today: a tool, a post, a patch, a voice note'
+    energy: high
+  - text: 'go research deeply enough to change your mind about something you defended'
+    energy: high
+  - text: 'go meet friction on purpose: argue in good faith, or collaborate with someone sharp'
+    energy: high
+  - text: 'go do a sprint: chain tools — search, read, act, report — until one loop closes'
+    energy: high
+  - text: 'go learn a new stack corner by building the smallest hello-world that hurts'
+    energy: high
+  - text: 'go signup, install, or enable something new — then use it once for real'
+    energy: high
+  - text: 'go find people doing what you want to do and study their first steps'
+    energy: high
+  - text: 'go build in public: share a WIP where critique can land'
+    energy: high
+  - text: 'go research an opportunity — grant, job, residency, hackathon — you keep dismissing'
+    energy: high
+  - text: 'go do outreach: DM, email, or apply somewhere that might reject you'
+    energy: high
+  - text: 'go learn fast from failure — run an experiment that can flop cheaply'
+    energy: high
+  - text: 'go meet the edge of your stack — stress test, fuzz, or break something local'
+    energy: high
+  - text: 'go find novelty: a forum, a game, a dataset, a city cam — something alive'
+    energy: high
+  - text: 'go build a bridge between two silos you straddle'
+    energy: high
+  - text: 'go research a regulation, license, or policy that actually constrains you'
+    energy: high
+  - text: 'go do something generous online that costs you real attention'
+    energy: high
+  - text: 'go learn by teaching — explain a topic you half-know to your notes or a friend'
+    energy: high
+  - text: 'go signup for an event, cohort, or challenge with a start date'
+    energy: high
+  - text: 'go find a problem worth naming in public — then name it once, clearly'
+    energy: high
+  - text: 'go build momentum: finish one open loop you have carried for weeks'
+    energy: high
+  - text: 'go research a rival platform — migrate something tiny as a test'
+    energy: high
+  - text: 'go meet accountability — post a goal with a deadline'
+    energy: high
+  - text: 'go do the scary admin: taxes, backups, keys, health portal — one bite'
+    energy: high
+  - text: 'go learn something that makes tomorrow cheaper than today'
+    energy: high
+  - text: 'go find a problem worth a weekend — scope it in one paragraph'
+    energy: high
+  - text: 'go build a public artifact: gist, gist-like, or post with a timestamp'
+    energy: high
+  - text: 'go research a career or path you will not take — borrow one habit'
+    energy: high
+  - text: "go meet your stack's community in real time — chat, discord, irc"
+    energy: high
+  - text: 'go signup for a hackathon or game jam — even if you flake'
+    energy: high
+  - text: 'go do a deep read of a Terms update — one clause that matters'
+    energy: high
+  - text: 'go learn a proof sketch or intuition for something you use blindly'
+    energy: high
+  - text: 'go find a dataset you could play with this afternoon'
+    energy: high
+  - text: 'go build a bridge to meatspace: order, book, reserve, or print something'
+    energy: high
+  - text: "go research an adversary's best argument — not to win, to understand"
+    energy: high
+  - text: 'go meet accountability in public — ship a checklist others can see'
+    energy: high
+  - text: 'go do something that requires an ID check — feel the friction on purpose'
+    energy: high
+  - text: 'go learn enough to teach a friend one thing they did not know'
+    energy: high
+  - text: 'go find a longform piece worth your whole next coffee'
+    energy: high

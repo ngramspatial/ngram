@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <title>ngram Studio</title>
+    <link rel="stylesheet" href="/studio.css" />
+  </head>
+  <body>
+    <div class="ambient ambient-a"></div>
+    <div class="ambient ambient-b"></div>
+    <div id="loading" class="loading-screen">
+      <div class="loading-mark"><span></span><span></span><span></span></div>
+      <p>Opening the canonical line…</p>
+    </div>
+
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></div>
+          <div>
+            <strong>ngram</strong>
+            <span>Studio</span>
+          </div>
+        </div>
+
+        <div class="entity-card">
+          <div id="entity-monogram" class="entity-monogram">N</div>
+          <div class="entity-copy">
+            <span>Open entity</span>
+            <strong id="entity-name">Loading…</strong>
+            <code id="entity-id">—</code>
+          </div>
+        </div>
+
+        <nav class="primary-nav" aria-label="Studio sections">
+          <button class="nav-item active" data-view="overview">
+            <span class="nav-icon">⌂</span><span>Overview</span><small>01</small>
+          </button>
+          <button class="nav-item" data-view="soma">
+            <span class="nav-icon">◉</span><span>Soma lab</span><small>02</small>
+          </button>
+          <button class="nav-item" data-view="domains">
+            <span class="nav-icon">⌘</span><span>State explorer</span><small>03</small>
+          </button>
+          <button class="nav-item" data-view="lineage">
+            <span class="nav-icon">⌁</span><span>Lineage</span><small>04</small>
+          </button>
+          <button class="nav-item" data-view="settings">
+            <span class="nav-icon">◇</span><span>Settings</span><small>05</small>
+          </button>
+        </nav>
+
+        <div class="sidebar-foot">
+          <div class="lock-mini">
+            <span id="lock-dot" class="status-dot"></span>
+            <div><small>Mount</small><strong id="lock-label">Checking</strong></div>
+          </div>
+          <p>Local application · no inference</p>
+        </div>
+      </aside>
+
+      <main class="main-stage">
+        <header class="topbar">
+          <div class="path-block">
+            <span>Canonical directory</span>
+            <code id="container-path">—</code>
+          </div>
+          <div class="top-actions">
+            <div id="integrity-chip" class="status-chip pending"><span></span>Verifying</div>
+            <button id="verify-button" class="button ghost">Verify</button>
+            <a id="export-button" class="button primary" href="/api/export" download>Export snapshot</a>
+          </div>
+        </header>
+
+        <div id="recovery-banner" class="recovery-banner hidden">
+          <div>
+            <span class="eyebrow">Interrupted session detected</span>
+            <strong>The retained runtime cache needs an explicit decision.</strong>
+            <p id="recovery-copy">Studio is read-only until recovery completes.</p>
+          </div>
+          <button id="recover-button" class="button warning">Recover canonical state</button>
+        </div>
+
+        <div id="notice-banner" class="notice-banner hidden"></div>
+
+        <section id="view-overview" class="view active">
+          <div class="view-heading">
+            <div>
+              <span class="eyebrow">Canonical state</span>
+              <h1 id="overview-title">A whole life, inspectable.</h1>
+            </div>
+            <p>Every domain is readable. Every transition is attributable. The model is absent by design.</p>
+          </div>
+
+          <div class="metric-grid">
+            <article class="metric-card hero-metric">
+              <span class="metric-label">Integrity root</span>
+              <strong id="integrity-short">—</strong>
+              <code id="integrity-root">—</code>
+              <div class="metric-foot"><span id="files-checked">0 files</span><span>SHA-256</span></div>
+            </article>
+            <article class="metric-card">
+              <span class="metric-label">Lineage depth</span>
+              <strong id="lineage-count">0</strong>
+              <p id="last-transition">No transitions yet</p>
+            </article>
+            <article class="metric-card">
+              <span class="metric-label">State surface</span>
+              <strong id="domain-bytes">0 B</strong>
+              <p id="domain-file-count">Across 7 domains</p>
+            </article>
+          </div>
+
+          <div class="overview-grid">
+            <article class="panel domain-panel">
+              <div class="panel-heading">
+                <div><span class="eyebrow">Seven domains</span><h2>State map</h2></div>
+                <button class="text-button" data-jump="domains">Inspect files →</button>
+              </div>
+              <div id="domain-map" class="domain-map"></div>
+            </article>
+
+            <article class="panel soma-glance">
+              <div class="panel-heading">
+                <div><span class="eyebrow">Tonic interior</span><h2>Right now</h2></div>
+                <button class="text-button" data-jump="soma">Open lab →</button>
+              </div>
+              <div id="soma-glance-bars" class="glance-bars"></div>
+            </article>
+          </div>
+
+          <article class="panel last-event-panel">
+            <div class="pulse-rail"><span></span></div>
+            <div>
+              <span class="eyebrow">Latest continuity event</span>
+              <h2 id="event-type">—</h2>
+              <p id="event-time">—</p>
+            </div>
+            <code id="event-hash">—</code>
+          </article>
+        </section>
+
+        <section id="view-soma" class="view">
+          <div class="view-heading">
+            <div><span class="eyebrow">Model-free simulator</span><h1>Soma lab</h1></div>
+            <p>Project homeostatic drift from the saved values toward their allostatic baselines. Preview only.</p>
+          </div>
+
+          <div class="soma-layout">
+            <article class="panel current-soma-panel">
+              <div class="panel-heading"><div><span class="eyebrow">Saved state</span><h2>Current bars</h2></div><span id="soma-saved-at" class="muted">—</span></div>
+              <div id="soma-current-bars" class="current-bars"></div>
+            </article>
+            <article class="panel projection-panel">
+              <div class="projection-head">
+                <div><span class="eyebrow">Elapsed-time projection</span><h2><span id="hours-label">24</span> hours later</h2></div>
+                <span id="simulation-source" class="source-pill">portable defaults</span>
+              </div>
+              <canvas id="soma-chart" aria-label="Projected soma values over elapsed time"></canvas>
+              <div class="time-control">
+                <span>15 min</span>
+                <input id="hours-input" type="range" min="0.25" max="168" step="0.25" value="24" />
+                <span>7 days</span>
+              </div>
+              <div id="projection-deltas" class="projection-deltas"></div>
+              <p class="simulation-note">This projection never writes canonical state and never invokes a model.</p>
+            </article>
+          </div>
+        </section>
+
+        <section id="view-domains" class="view">
+          <div class="view-heading">
+            <div><span class="eyebrow">Human-inspectable container</span><h1>State explorer</h1></div>
+            <p>Browse every canonical domain without exposing paths outside this entity.</p>
+          </div>
+          <div class="explorer">
+            <aside id="domain-tabs" class="domain-tabs"></aside>
+            <div id="file-list" class="file-list"></div>
+            <article class="file-preview">
+              <div class="file-preview-head"><span id="preview-name">Select a state file</span><small id="preview-size">—</small></div>
+              <pre id="preview-content">The canonical contents will appear here.</pre>
+            </article>
+          </div>
+        </section>
+
+        <section id="view-lineage" class="view">
+          <div class="view-heading">
+            <div><span class="eyebrow">Hash-linked transitions</span><h1>Lineage</h1></div>
+            <p>A local, integrity-covered account of how this entity reached its present state.</p>
+          </div>
+          <div id="lineage-list" class="lineage-list"></div>
+        </section>
+
+        <section id="view-settings" class="view">
+          <div class="view-heading">
+            <div><span class="eyebrow">Bounded canonical editing</span><h1>Settings</h1></div>
+            <p>Only four declarative documents are editable. Credentials are rejected, and every save advances lineage.</p>
+          </div>
+          <div class="settings-layout">
+            <aside id="settings-tabs" class="settings-tabs"></aside>
+            <article class="panel settings-editor">
+              <div class="panel-heading">
+                <div><span class="eyebrow">JSON document</span><h2 id="settings-title">Preferences</h2></div>
+                <span id="editor-status" class="source-pill">Canonical</span>
+              </div>
+              <textarea id="settings-json" spellcheck="false" aria-label="Canonical JSON settings"></textarea>
+              <div class="settings-actions">
+                <p id="settings-help">Curiosity, cognition, and drive preferences.</p>
+                <button id="save-settings" class="button primary">Save and advance lineage</button>
+              </div>
+            </article>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div id="toast" class="toast" role="status"></div>
+    <script type="module" src="/studio.js"></script>
+  </body>
+</html>

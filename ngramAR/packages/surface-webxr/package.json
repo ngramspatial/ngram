@@ -1,0 +1,28 @@
+{
+  "name": "@ngram-ar/surface-webxr",
+  "version": "1.0.0",
+  "description": "WebXR rendering surface for ngram AR (Three.js)",
+  "type": "module",
+  "scripts": {
+    "build": "node build.js",
+    "dev": "node build.js --watch",
+    "clean": "rimraf dist"
+  },
+  "dependencies": {
+    "@dimforge/rapier3d-compat": "^0.19.3",
+    "@ngram-ar/core": "*",
+    "@ngram-ar/embodiment": "*",
+    "highlight.js": "^11.11.1",
+    "marked": "^17.0.5",
+    "three": "^0.172.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.27.4"
+  },
+  "license": "MIT",
+  "keywords": [
+    "ngram-ar",
+    "spatial",
+    "ai-agents"
+  ]
+}
