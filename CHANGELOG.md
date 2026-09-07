@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Changed the Python runtime and root project license to MIT, matching `ngramAR`.
+
 - Added a persistent, shared inference pause with Telegram operator commands and a spatial pause/resume control. Pausing cancels active model work and blocks new chat, embedding, and background requests.
 - Fixed Telegram `/compact` to summarize older turns instead of clearing history, without blocking incoming control commands.
 - Made Telegram context displays follow the active provider's working budget and report automatic compaction progress.

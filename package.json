@@ -2,6 +2,7 @@
   "name": "ngram-monorepo",
   "version": "1.0.0",
   "private": true,
+  "license": "MIT",
   "description": "Persistent agents with memory, relationships, tools, and replaceable AR bodies.",
   "scripts": {
     "ar:install": "npm --prefix ngramAR install",

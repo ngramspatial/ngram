@@ -3,7 +3,7 @@ name = "ngram"
 dynamic = ["version"]
 description = "The open engine for engrammatic intelligence"
 readme = "README.md"
-license = { text = "Apache-2.0" }
+license = { text = "MIT" }
 requires-python = ">=3.11"
 dependencies = [
     "aiohttp>=3.9",

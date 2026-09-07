@@ -383,5 +383,6 @@ usage; automatic compaction reports its progress in Telegram and spatial.
 
 ## License
 
-The Python runtime and root project are Apache-2.0. The `ngramAR` component is
-MIT-licensed; see [ngramAR/LICENSE](ngramAR/LICENSE).
+ngram, including the Python runtime and `ngramAR`, is licensed under the
+[MIT License](LICENSE). Third-party dependencies and model assets retain
+their own licenses and notices.
