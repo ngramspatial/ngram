@@ -558,7 +558,8 @@ class EntityCognition:
     deliberate_model: str = ""
     always_deliberate: bool = False
     fast_deliberate_mode: bool = False
-    deliberate_max_tokens: int = 0  # 0 => use harness.cognition.deliberate_max_tokens
+    # 0 inherits the harness cap; explicit YAML null omits the provider output cap.
+    deliberate_max_tokens: int | None = 0
     system_prompt_char_limit: int = 12000
     rolling_history_max_messages: int = 200
     knowledge_recent_turns: int = 10
@@ -574,6 +575,8 @@ class EntityCognition:
     message_budget_per_turn: int = 12
     # 0 = use harness.cognition.tool_continuation_rounds
     tool_continuation_rounds: int = 0
+    # Spatial wall-clock ceiling; long-running development entities can override locally.
+    turn_timeout_seconds: float = 120.0
     # When False, omit OpenAI-style ``tools`` from chat/completions (non-tool-capable local models).
     use_api_tools: bool = True
 
@@ -1037,7 +1040,10 @@ def entity_from_dict(harness: HarnessConfig, data: dict[str, Any]) -> EntityConf
         ),
         always_deliberate=bool(cog.get("always_deliberate", False)),
         fast_deliberate_mode=bool(cog.get("fast_deliberate_mode", False)),
-        deliberate_max_tokens=max(0, int(cog.get("deliberate_max_tokens", 0) or 0)),
+        deliberate_max_tokens=(
+            None if "deliberate_max_tokens" in cog and cog["deliberate_max_tokens"] is None
+            else max(0, int(cog.get("deliberate_max_tokens", 0) or 0))
+        ),
         system_prompt_char_limit=max(
             2000, int(cog.get("system_prompt_char_limit", 12000) or 12000)
         ),
@@ -1053,8 +1059,9 @@ def entity_from_dict(harness: HarnessConfig, data: dict[str, Any]) -> EntityConf
         max_context_tokens=int(cog.get("max_context_tokens", harness.cognition.max_context_tokens)),
         thinking_budget=int(cog.get("thinking_budget", harness.cognition.thinking_budget)),
         history_compression=history_compression,
-        message_budget_per_turn=max(1, min(128, int(cog.get("message_budget_per_turn", 12) or 12))),
-        tool_continuation_rounds=max(0, min(64, int(cog.get("tool_continuation_rounds", 0) or 0))),
+        message_budget_per_turn=max(1, int(cog.get("message_budget_per_turn", 12) or 12)),
+        tool_continuation_rounds=max(0, int(cog.get("tool_continuation_rounds", 0) or 0)),
+        turn_timeout_seconds=max(1.0, float(cog.get("turn_timeout_seconds", 120.0) or 120.0)),
         use_api_tools=bool(cog.get("use_api_tools", True)),
     )
     pr = data.get("presence") or {}
@@ -1174,6 +1181,9 @@ def load_entity_config(
         )
     ent_path = _resolve_named_entity_path(entity_name)
     merged = load_entity_yaml(ent_path)
+    local_path = ent_path.with_suffix(".local.yaml")
+    if local_path.is_file() and local_path != ent_path:
+        merged = _merge_dict(merged, load_entity_yaml(local_path))
     return entity_from_dict(h, merged)
 
 

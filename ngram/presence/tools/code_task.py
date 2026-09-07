@@ -103,7 +103,8 @@ async def code_task_session(
         return json.dumps({"error": "objective is empty"}, ensure_ascii=False)
 
     phases = max(1, min(8, int(max_phases or 3)))
-    steps = max(5, min(25, int(steps_per_phase or 14)))
+    ceiling = max(25, ent.deliberate._agent_step_cap())
+    steps = max(5, min(ceiling, int(steps_per_phase or 14)))
 
     slug = _slug_objective(obj)
     rel = _normalize_task_path(task_record_path, slug=slug)

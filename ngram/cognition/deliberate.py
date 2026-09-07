@@ -175,9 +175,10 @@ class DeliberateStreamEvent:
 class DeliberateCognition:
     def __init__(self, entity: EntityConfig, client: InferenceProvider) -> None:
         self.entity = entity
+        self.latest_context_status: dict[str, Any] | None = None
         self.client = client
 
-    def _inference_params(self, profile: InferenceProfile) -> tuple[str, int, bool, float]:
+    def _inference_params(self, profile: InferenceProfile) -> tuple[str, int | None, bool, float]:
         """Model id, max_tokens, think flag, temperature."""
         h = self.entity.harness.cognition
         ec = self.entity.cognition
@@ -188,20 +189,22 @@ class DeliberateCognition:
             mt = max(32, int(h.reflex_max_tokens))
             return model, mt, False, float(min(0.9, ec.temperature))
         model = (ec.deliberate_model or "").strip()
-        mt = int(ec.deliberate_max_tokens or h.deliberate_max_tokens)
-        mt = max(128, mt)
-        return model, mt, bool(ec.thinking_mode), float(ec.temperature)
+        output_cap = (
+            None if ec.deliberate_max_tokens is None
+            else max(128, int(ec.deliberate_max_tokens or h.deliberate_max_tokens))
+        )
+        return model, output_cap, bool(ec.thinking_mode), float(ec.temperature)
 
     def _tool_continuation_rounds_cap(self) -> int:
         """Legacy continuation knob; still shapes the bounded agent loop."""
         h = int(self.entity.harness.cognition.tool_continuation_rounds)
         ec = int(self.entity.cognition.tool_continuation_rounds)
         n = ec if ec > 0 else h
-        return max(0, min(64, n))
+        return max(0, n)
 
     def _agent_step_cap(self) -> int:
         """Primary bounded loop budget for a single user turn."""
-        return max(6, min(80, 6 + self._tool_continuation_rounds_cap()))
+        return max(6, 6 + self._tool_continuation_rounds_cap())
 
     def _build_messages(
         self,
@@ -352,15 +355,15 @@ class DeliberateCognition:
         if isinstance(meta, dict):
             if meta.get("delegation"):
                 cap = int(meta.get("delegation_max_steps") or 10)
-                step_cap = max(3, min(25, cap))
+                step_cap = max(3, min(max(25, self._agent_step_cap()), cap))
             elif meta.get("code_task"):
                 cap = int(meta.get("code_task_max_steps") or 14)
-                step_cap = max(5, min(25, cap))
+                step_cap = max(5, min(max(25, self._agent_step_cap()), cap))
             ss = meta.get("sustained_session")
             if isinstance(ss, dict):
                 extra = int(ss.get("extra_tool_steps", 0) or 0)
                 if extra > 0:
-                    step_cap = min(40, step_cap + extra)
+                    step_cap = max(step_cap, min(40, step_cap + extra))
         loop_state = AgentLoopState(
             step_budget=step_cap,
             user_requested_tools="use tools" in (_inp.text or "").lower(),
@@ -374,10 +377,14 @@ class DeliberateCognition:
         delivered_reply = False
         step_idx = 0
         while step_idx < loop_state.step_budget and step_idx < hard_step_cap:
-            await report_context_status(
-                "usage", inputBudgetTokens=self.entity.effective_context_tokens(),
-                estimatedTokens=estimate_context_tokens("", msgs, tools_block=tools_budget_block),
-            )
+            from ngram.inference.factory import effective_inference_provider_name
+            self.latest_context_status = {
+                "phase": "usage", "source": "prompt", "model": model,
+                "provider": effective_inference_provider_name(self.entity.harness),
+                "inputBudgetTokens": self.entity.effective_context_tokens(),
+                "estimatedTokens": estimate_context_tokens("", msgs, tools_block=tools_budget_block),
+            }
+            await report_context_status(**self.latest_context_status)
             loop_state.step_index = step_idx + 1
             res = await self.client.chat_completion(
                 model,

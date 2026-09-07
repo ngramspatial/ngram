@@ -13,6 +13,7 @@ export class EntityBridgeBinding {
     shellName;
     shellSlug;
     brainConfig;
+    responseTimeoutMs;
     surfaceReadyEvent = null;
     ws = null;
     started = false;
@@ -35,6 +36,7 @@ export class EntityBridgeBinding {
         this.shellName = ctx.shellName;
         this.shellSlug = ctx.shellSlug;
         this.brainConfig = config.brainConfig ?? null;
+        this.responseTimeoutMs = config.responseTimeoutMs ?? 600000;
     }
     onProactiveAction(callback) {
         this.proactive = callback;
@@ -331,7 +333,7 @@ export class EntityBridgeBinding {
                     this.pending.delete(id);
                     reject(new Error("Timed out waiting for entity bridge response"));
                 }
-            }, 600000);
+            }, this.responseTimeoutMs);
             this.pending.set(id, { resolve, reject, parts: [], timeout });
             const payload = {
                 type: "session.event",

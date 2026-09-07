@@ -91,3 +91,6 @@ Desktop.ini
 
 # Local product website
 /website/
+
+# Private entity overrides
+configs/entities/*.local.yaml

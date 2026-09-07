@@ -5,6 +5,10 @@ from __future__ import annotations
 import pytest
 
 from ngram.inference.openai_transport import OpenAICompatibleTransport, OpenAIResponsesTransport
+from ngram.inference.providers import LocalRuntimeProvider
+from ngram.cognition.deliberate import DeliberateCognition
+from ngram.config import HarnessConfig, entity_from_dict
+from ngram.models import Input
 
 
 @pytest.mark.asyncio
@@ -177,6 +181,43 @@ def test_astra_keeps_larger_work_budgets_and_sol_keeps_nonreasoning_checks() -> 
     sol = t._build_responses_payload("gpt-5.6-sol", [], max_tokens=8, think=False)
     assert sol["reasoning"] == {"effort": "none"}
     assert sol["max_output_tokens"] == 8
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("think", [False, True])
+async def test_uncapped_work_reaches_responses_api_without_a_token_ceiling(think):
+    transport = OpenAIResponsesTransport(base_url="https://api.openai.com", gemma_shaping=False)
+    captured = []
+
+    async def fake_post(path, payload):
+        assert path == "/responses"
+        captured.append(payload)
+        return {"status": "completed", "output": [{"type": "message", "role": "assistant", "content": [
+            {"type": "output_text", "text": "The game is implemented and tested."},
+        ]}]}
+
+    transport._post_json = fake_post
+    config = entity_from_dict(HarnessConfig(), {"name": "Rook", "cognition": {
+        "deliberate_model": "gpt-6-astra", "deliberate_max_tokens": None, "thinking_mode": think,
+    }})
+    cognition = DeliberateCognition(config, LocalRuntimeProvider(transport))
+    inp = Input(text="Build the game", person_id="u", person_name="U")
+    events = [event async for event in cognition.iter_responses(
+        inp, "system", [{"role": "user", "content": inp.text}],
+    )]
+    assert events[-1].display_text == "The game is implemented and tested."
+    assert len(captured) == 1
+    assert "max_output_tokens" not in captured[0]
+    assert "max_tokens" not in captured[0]
+    assert captured[0]["reasoning"]["effort"] == ("medium" if think else "low")
+
+
+@pytest.mark.parametrize("field", ["max_tokens", "max_completion_tokens"])
+def test_uncapped_chat_completions_omit_token_limit_fields(field):
+    transport = OpenAICompatibleTransport(base_url="https://api.example", max_tokens_field=field)
+    payload = transport._build_chat_completions_payload("model", [], max_tokens=None)
+    assert "max_tokens" not in payload
+    assert "max_completion_tokens" not in payload
 
 
 def test_responses_tools_preserve_optional_arguments_and_explicit_strict_opt_in() -> None:

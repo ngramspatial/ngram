@@ -11,6 +11,8 @@ import { captionPages } from './speech-captions.js';
 import { setupVoiceSettings } from './voice-settings.js';
 import { mergeVoiceDraft } from './voice-draft.js';
 import { updateContextDisplay } from './context-status.js';
+import { setupContextWheel } from './context-wheel.js';
+import { setupResponseControl } from './response-control.js';
 import type { ContextDisplayState } from './context-status.js';
 import { XRManager } from './xr-manager.js';
 import { setupUI } from './ui.js';
@@ -80,13 +82,17 @@ async function main() {
     lights,
   } = createScene();
   const ui = setupUI();
+  const responseControl = setupResponseControl(ui.sendBtn, sendTextMessage, stopResponse);
   let contextDisplay: ContextDisplayState = {};
   function handleContextStatus(status: any): void {
     const display = updateContextDisplay(contextDisplay, status);
     contextDisplay = display.state;
+    contextWheel.update(contextDisplay);
+    responseControl.update({ compacting: !!contextDisplay.compacting });
     if (status.phase !== 'usage') notifyCommand(display.text);
   }
   const connection = new ConnectionManager(false);
+  const contextWheel = setupContextWheel(() => connection.send({ type: 'event:context_status' }));
   const avatar = new AvatarController();
   const speech = new SpeechHandler();
   setupVoiceSettings({
@@ -642,10 +648,17 @@ async function main() {
   let inferencePoll: ReturnType<typeof setInterval> | undefined;
   function queryInferenceStatus(): void {
     connection.send({ type: 'event:inference_control', command: 'status' });
+    connection.send({ type: 'event:context_status' });
   }
 
   // --- Connection status ---
   connection.onStatusChange((status) => {
+    contextWheel.setConnected(status === 'connected');
+    if (status !== 'connected') {
+      contextDisplay = {};
+      clearResponsePlayback();
+      responseControl.reset();
+    }
     switch (status) {
       case 'connected':
         ui.setStatus('connected', true);
@@ -860,12 +873,13 @@ async function main() {
         clearResponsePlayback();
         clearMessagingIdleTimer();
         applyAgentState('idle');
+        responseControl.reset();
         ui.hideBusy();
         ui.showSubtitle(shellName, (msg as any).reason === 'timeout'
           ? 'Turn stopped at the time limit.' : 'Stopped.', 2500);
         break;
       case 'action:inference_status':
-        if (msg.paused) clearResponsePlayback();
+        if (msg.paused) { clearResponsePlayback(); responseControl.reset(); }
         break;
       case 'action:context_status':
         handleContextStatus(msg);
@@ -1066,6 +1080,7 @@ async function main() {
       case 'action:error': {
         const code = msg.code ?? 'internal_error';
         const errMsg = msg.message ?? 'An error occurred';
+        responseControl.update({ agentState: 'error' });
         console.error(`[ngram-ar] Agent error (${code}): ${errMsg}`);
         ui.addTranscript('system', `⚠ ${errMsg}`);
 
@@ -1181,6 +1196,8 @@ async function main() {
 
   function handleAgentState(msg: SpatialAction): void {
     const state = (msg as any).state as VisualAgentState ?? 'idle';
+    // Reflect actual completion immediately, even if an avatar animation lingers.
+    responseControl.update({ agentState: state });
     const tool = (msg as any).tool as { name: string; description?: string } | undefined;
     const message = (msg as any).message as string | undefined;
 
@@ -1218,6 +1235,7 @@ async function main() {
   }
 
   function handleGoIdle(): void {
+    responseControl.update({ agentState: 'idle' });
     clearMessagingIdleTimer();
     messagingStartedAt = 0;
     applyAgentState('idle');
@@ -1238,6 +1256,7 @@ async function main() {
 
   function handleSpeakStreamStart(msg: SpatialAction) {
     activeStreamId = (msg as any).streamId;
+    responseControl.update({ playing: true });
     streamedText = '';
     avatar.setSpeaking(true);
     avatar.setAnimation(pickSpeakAnim());
@@ -1711,6 +1730,7 @@ async function main() {
 
   function handleSpeak(msg: any) {
     pendingSpeakCount++;
+    responseControl.update({ playing: true });
     ambient.recordInteraction();
 
     if (msg.text) {
@@ -1721,6 +1741,7 @@ async function main() {
 
     const onEnd = (cancelled = false) => {
       pendingSpeakCount--;
+      responseControl.update({ playing: pendingSpeakCount > 0 || activeStreamId !== null });
       if (!cancelled) connection.send({
         type: 'event:action_completed',
         action: 'speak',
@@ -1900,13 +1921,13 @@ async function main() {
     ui.textInput.dispatchEvent(new Event('input'));
   }
 
-  ui.sendBtn.addEventListener('click', sendTextMessage);
   attachSlashCommands(ui.textInput, sendTextMessage);
   function clearResponsePlayback(): void {
     speech.stopPlayback();
     pendingSpeakCount = 0;
     activeStreamId = null;
     streamedText = '';
+    responseControl.update({ playing: false });
     avatar.setSpeaking(false);
     if (!shouldPreserveCurrentAnimation()) avatar.setAnimation('idle');
     if (xr.isARActive) spatialUI.hideBubble();
@@ -1916,11 +1937,11 @@ async function main() {
   }
   function stopResponse(): void {
     clearResponsePlayback();
+    responseControl.reset();
     connection.send({ type: 'event:cancel_turn' });
   }
-  document.getElementById('stop-turn-btn')?.addEventListener('click', stopResponse);
   document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && (contextDisplay.compacting || isThinkingAgentState(currentAgentState) || currentAgentState === 'messaging' || avatar.isSpeaking())) {
+    if (event.key === 'Escape' && responseControl.isActive()) {
       event.preventDefault();
       stopResponse();
     }

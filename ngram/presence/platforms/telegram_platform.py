@@ -1848,10 +1848,15 @@ class TelegramPlatform(Platform):
         )
         if summary:
             body += f"  Rolling summary: ~{summary_chars // 4:,} tokens\n"
+        output_cap = cfg.cognition.deliberate_max_tokens
+        output_cap_label = (
+            "provider limit (no harness cap)" if output_cap is None
+            else f"{int(output_cap or cfg.harness.cognition.deliberate_max_tokens):,}"
+        )
         body += (
             f"\n<b>Config:</b>\n"
             f"  Effective working budget: {max_ctx:,}\n"
-            f"  deliberate_max_tokens: {int(cfg.cognition.deliberate_max_tokens or cfg.harness.cognition.deliberate_max_tokens):,}\n"
+            f"  deliberate_max_tokens: {output_cap_label}\n"
             f"  reflex_max_tokens: {cfg.harness.cognition.reflex_max_tokens:,}\n"
             f"  history messages: {len(history)} / {cfg.cognition.rolling_history_max_messages}\n"
             f"  compression: {'on' if cfg.cognition.history_compression.enabled else 'off'}"

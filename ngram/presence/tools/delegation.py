@@ -82,7 +82,8 @@ async def delegate_task(
             ensure_ascii=False,
         )
 
-    steps = max(3, min(25, int(max_tool_steps or 12)))
+    ceiling = max(25, ent.deliberate._agent_step_cap())
+    steps = max(3, min(ceiling, int(max_tool_steps or 12)))
 
     meta = {
         "delegation": True,

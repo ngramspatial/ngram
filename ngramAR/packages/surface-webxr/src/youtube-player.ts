@@ -114,6 +114,8 @@ export class YouTubePlayer {
   /** Immersive sessions block unmuted autoplay; squeeze consumes this to unMute(). */
   private pendingArAudioUnlock = false;
   private startPaused = false;
+  private playGeneration = 0;
+  private playerGeneration = 0;
 
   onStateChange(cb: StateCallback): void {
     this.stateCallbacks.push(cb);
@@ -160,12 +162,14 @@ export class YouTubePlayer {
     if (!value?.open || typeof value.videoId !== 'string') return;
     const videoId = value.videoId.trim();
     if (!/^[A-Za-z0-9_-]{6,32}$/.test(videoId)) return;
+    const generation = this.playGeneration + 1;
     await this.play(videoId, {
       title: typeof value.title === 'string' ? value.title.slice(0, 500) : '',
       volume: Number.isFinite(value.volume) ? value.volume : 50,
       startAt: Number.isFinite(value.currentTime) ? Math.max(0, value.currentTime) : 0,
       startPaused: Boolean(value.paused),
     });
+    if (!this._open || generation !== this.playGeneration) return;
     this.setMinimized(Boolean(value.minimized), false);
     applyDomPanelLayout(this.container, value.layout, { width: 280, height: 180 });
     this.emit();
@@ -199,6 +203,7 @@ export class YouTubePlayer {
   }
 
   async play(videoId: string, opts?: { title?: string; volume?: number; startAt?: number; arAudioUnlock?: boolean; startPaused?: boolean }): Promise<void> {
+    const generation = ++this.playGeneration;
     this._videoId = videoId;
     this._title = opts?.title ?? '';
     this._volume = opts?.volume ?? 50;
@@ -206,7 +211,7 @@ export class YouTubePlayer {
     const arUnlock = !!opts?.arAudioUnlock;
     this.startPaused = Boolean(opts?.startPaused);
 
-    if (this._open) {
+    if (this._open && this.player) {
       this.player?.loadVideoById({ videoId, startSeconds: opts?.startAt ?? 0 });
       this.player?.setVolume(this._volume);
       this.retryTriedForCurrentVideo = false;
@@ -226,9 +231,12 @@ export class YouTubePlayer {
     this.activeHost = 'youtube';
     this.retryTriedForCurrentVideo = false;
     this.pendingArAudioUnlock = arUnlock;
+    // Keep Close available even while the external iframe API is loading.
+    this.createDOM();
+    this.updateTitle();
     this.emit();
     await ensureAPI();
-    this.createDOM();
+    if (!this._open || generation !== this.playGeneration) return;
     this.mountPlayer(videoId, this.lastStartAt, arUnlock, this.startPaused);
   }
 
@@ -245,13 +253,23 @@ export class YouTubePlayer {
   }
 
   stop(): void {
+    ++this.playGeneration;
+    ++this.playerGeneration;
+    this._open = false;
+    this.dragging = false;
+    this.minimized = false;
     this.pendingArAudioUnlock = false;
     this.retryTriedForCurrentVideo = false;
     this.activeHost = 'youtube';
     this.lastStartAt = 0;
     this.startPaused = false;
-    this.player?.destroy();
+    const player = this.player;
     this.player = null;
+    try {
+      player?.destroy();
+    } catch (error) {
+      console.warn('[youtube] Player cleanup failed:', error);
+    }
     this.disposeResize?.();
     this.disposeResize = null;
     this.container?.remove();
@@ -289,6 +307,9 @@ export class YouTubePlayer {
   }
 
   private mountPlayer(videoId: string, startAt: number, arUnlock: boolean, startPaused = false): void {
+    if (!this._open || !this.container) return;
+    const generation = ++this.playerGeneration;
+    const isCurrent = () => this._open && generation === this.playerGeneration;
     const playerDiv = document.getElementById('yt-player-frame')!;
     playerDiv.innerHTML = '';
 
@@ -312,6 +333,7 @@ export class YouTubePlayer {
       },
       events: {
         onReady: () => {
+          if (!isCurrent() || !this.player) return;
           this.player!.setVolume(this._volume);
           if (startPaused) {
             this.player!.pauseVideo();
@@ -322,17 +344,21 @@ export class YouTubePlayer {
           this.emit();
         },
         onStateChange: (event) => {
+          if (!isCurrent()) return;
           const states = window.YT?.PlayerState;
           if (event.data === states?.PLAYING) this.startPaused = false;
           if (event.data === states?.PAUSED) this.startPaused = true;
           this.emit();
         },
-        onError: (e: { data: number }) => this.handlePlayerError(e.data),
+        onError: (e: { data: number }) => {
+          if (isCurrent()) this.handlePlayerError(e.data);
+        },
       },
     });
   }
 
   private handlePlayerError(code: number): void {
+    if (!this._open) return;
     console.warn('[youtube] Player error:', code, '(host:', this.activeHost, ')');
 
     // 2/100 are invalid ID / removed video and won't improve with host switch.
@@ -341,6 +367,7 @@ export class YouTubePlayer {
       this.retryTriedForCurrentVideo = true;
       this.activeHost = this.activeHost === 'youtube' ? 'nocookie' : 'youtube';
       const seek = this.player?.getCurrentTime?.() ?? this.lastStartAt;
+      ++this.playerGeneration;
       this.player?.destroy();
       this.player = null;
       this.mountPlayer(this._videoId, seek, this.pendingArAudioUnlock, this.startPaused);
@@ -361,8 +388,8 @@ export class YouTubePlayer {
       <div class="yt-player-header" id="yt-player-header">
         <div class="yt-player-title" id="yt-player-title">${this.esc(this._title || 'YouTube')}</div>
         <div class="yt-player-controls">
-          <button class="yt-player-btn" id="yt-btn-minimize" title="Minimize">─</button>
-          <button class="yt-player-btn yt-btn-close" id="yt-btn-close" title="Close">✕</button>
+          <button type="button" class="yt-player-btn" id="yt-btn-minimize" title="Minimize" aria-label="Minimize YouTube">─</button>
+          <button type="button" class="yt-player-btn yt-btn-close" id="yt-btn-close" title="Close" aria-label="Close YouTube">✕</button>
         </div>
       </div>
       <div class="yt-player-body" id="yt-player-body">
@@ -399,7 +426,11 @@ export class YouTubePlayer {
     const body = document.getElementById('yt-player-body');
     const btn = document.getElementById('yt-btn-minimize');
     if (body) body.style.display = this.minimized ? 'none' : 'block';
-    if (btn) btn.textContent = this.minimized ? '□' : '─';
+    if (btn) {
+      btn.textContent = this.minimized ? '□' : '─';
+      btn.title = this.minimized ? 'Restore' : 'Minimize';
+      btn.setAttribute('aria-label', this.minimized ? 'Restore YouTube' : 'Minimize YouTube');
+    }
     if (this.container) {
       this.container.style.width = this.minimized ? '280px' : '';
     }
@@ -411,6 +442,9 @@ export class YouTubePlayer {
     if (!header || !this.container) return;
 
     const onDown = (e: PointerEvent) => {
+      // Capturing a button's pointer on the header redirects its click away
+      // from the button. Only the title-bar background should start a drag.
+      if (e.button !== 0 || (e.target as Element)?.closest('button, a, input, select, textarea')) return;
       this.dragging = true;
       const rect = this.container!.getBoundingClientRect();
       this.dragOffset.x = e.clientX - rect.left;
@@ -429,9 +463,10 @@ export class YouTubePlayer {
       this.container.style.bottom = 'auto';
     };
 
-    const onUp = () => {
+    const onUp = (e: PointerEvent) => {
       if (!this.dragging) return;
       this.dragging = false;
+      if (header.hasPointerCapture(e.pointerId)) header.releasePointerCapture(e.pointerId);
       this.emit();
     };
 

@@ -508,7 +508,9 @@ async def websocket_handler(request: web.Request) -> web.WebSocketResponse:
     async def process_turn(eid: str, et: str, event: dict[str, Any], context: dict[str, Any]) -> None:
         try:
             async with event_lock:
-                async with asyncio.timeout(_AR_TURN_TIMEOUT_SECONDS):
+                cognition = getattr(getattr(entity, "config", None), "cognition", None)
+                timeout_seconds = getattr(cognition, "turn_timeout_seconds", _AR_TURN_TIMEOUT_SECONDS)
+                async with asyncio.timeout(timeout_seconds):
                     actions = await _handle_shell_event(
                         entity, et, event, bridge_session_id or "", shell_slug, shell_name,
                         ar_cognition_context_md=ar_cognition_context_md,
@@ -733,6 +735,13 @@ async def websocket_handler(request: web.Request) -> web.WebSocketResponse:
                         await _send_actions(ws, eid, _speak_and_look(bridge_session_id or "", "…"))
                         continue
                     et = str(event.get("type") or "")
+                    if et == "event:context_status":
+                        from ngram.ngram_ar.context_telemetry import context_snapshot
+                        await _send_actions(ws, eid, [{
+                            "type": "action:context_status", **context_snapshot(entity),
+                            "sessionId": bridge_session_id, "timestamp": int(time.time() * 1000),
+                        }])
+                        continue
                     if et == "event:action_completed":
                         # Receipts must bypass Entity.perceive and its turn lock:
                         # the active Telegram/AR tool may be awaiting this event.
@@ -917,6 +926,8 @@ async def _handle_shell_event(
             report_token = context_reporter.set(ar_platform.send_context_status)
             try:
                 result = await entity.compact_context_now(passes=1)
+                if result.get("compacted") and getattr(entity, "deliberate", None) is not None:
+                    entity.deliberate.latest_context_status = None
                 if not result.get("compacted"):
                     reason = result.get("reason", "")
                     await ar_platform.send_context_status({

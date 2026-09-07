@@ -135,7 +135,7 @@ class OpenAICompatibleTransport:
         tools: Optional[list[dict[str, Any]]] = None,
         tool_choice: Optional[str] = None,
         temperature: float = 0.7,
-        max_tokens: int = 1024,
+        max_tokens: int | None = 1024,
         think: bool = False,
         stream: bool = False,
         num_ctx: Optional[int] = None,
@@ -169,7 +169,8 @@ class OpenAICompatibleTransport:
         }
         if self.pass_temperature:
             payload["temperature"] = temperature
-        payload[self.max_tokens_field] = max_tokens
+        if max_tokens is not None:
+            payload[self.max_tokens_field] = max_tokens
         if tools:
             payload["tools"] = tools
             if tool_choice:
@@ -186,7 +187,7 @@ class OpenAICompatibleTransport:
         tools: Optional[list[dict[str, Any]]] = None,
         tool_choice: Optional[str] = None,
         temperature: float = 0.7,
-        max_tokens: int = 1024,
+        max_tokens: int | None = 1024,
         think: bool = False,
         stream: bool = False,
         num_ctx: Optional[int] = None,
@@ -430,22 +431,24 @@ class OpenAIResponsesTransport(OpenAICompatibleTransport):
         *,
         tools: Optional[list[dict[str, Any]]] = None,
         tool_choice: Optional[str] = None,
-        max_tokens: int = 1024,
+        max_tokens: int | None = 1024,
         think: bool = False,
         stream: bool = False,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "model": model,
             "input": self._responses_input(messages),
-            "max_output_tokens": max_tokens,
             "store": False,
             "stream": stream,
         }
+        if max_tokens is not None:
+            payload["max_output_tokens"] = max_tokens
         if model == "gpt-6-astra" or model.startswith("gpt-6-astra-"):
             payload["reasoning"] = {"effort": "medium" if think else "low"}
             # Responses counts reasoning toward the output cap. Tiny classifiers
             # still need room to reason before emitting their short visible answer.
-            payload["max_output_tokens"] = max(max_tokens, 2048 if think else 1024)
+            if max_tokens is not None:
+                payload["max_output_tokens"] = max(max_tokens, 2048 if think else 1024)
         elif model.startswith(("gpt-5.6", "gpt-6")):
             payload["reasoning"] = {"effort": "medium" if think else "none"}
         if tools:
@@ -464,7 +467,7 @@ class OpenAIResponsesTransport(OpenAICompatibleTransport):
         tools: Optional[list[dict[str, Any]]] = None,
         tool_choice: Optional[str] = None,
         temperature: float = 0.7,
-        max_tokens: int = 1024,
+        max_tokens: int | None = 1024,
         think: bool = False,
         stream: bool = False,
         num_ctx: Optional[int] = None,

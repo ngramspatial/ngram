@@ -52,8 +52,9 @@ async def test_compact_summarizes_under_turn_lock_and_never_resets(failure):
 
 
 @pytest.mark.asyncio
-async def test_context_uses_effective_provider_budget():
-    cognition = EntityCognition(max_context_tokens=16384)
+@pytest.mark.parametrize('output_cap', [0, None])
+async def test_context_uses_effective_provider_budget(output_cap):
+    cognition = EntityCognition(max_context_tokens=16384, deliberate_max_tokens=output_cap)
     entity = SimpleNamespace(config=SimpleNamespace(
         cognition=cognition, effective_context_tokens=lambda: 256000,
         harness=SimpleNamespace(cognition=SimpleNamespace(deliberate_max_tokens=16000, reflex_max_tokens=1000)),
@@ -63,6 +64,7 @@ async def test_context_uses_effective_provider_budget():
     text = platform._reply_html.call_args.args[1]
     assert '<b>Budget:</b> 256,000 tokens' in text
     assert 'Approximate usage, not provider billing' in text
+    assert ('provider limit (no harness cap)' if output_cap is None else '16,000') in text
 
 
 @pytest.mark.asyncio

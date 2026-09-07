@@ -2350,7 +2350,7 @@ class Entity:
         sys_prompt: str,
         recent_messages: list[dict],
         partial_assistant: str,
-        max_tokens: int,
+        max_tokens: int | None,
         sys_cap: int,
     ) -> str:
         h = self.config.harness.cognition
@@ -2408,7 +2408,8 @@ class Entity:
         )
         sys_cap = max(2000, int(self.config.cognition.system_prompt_char_limit or 12000))
         if is_deliberate:
-            mt = int(self.config.cognition.deliberate_max_tokens or self.config.harness.cognition.deliberate_max_tokens)
+            output_cap = self.config.cognition.deliberate_max_tokens
+            mt = None if output_cap is None else int(output_cap or self.config.harness.cognition.deliberate_max_tokens)
         else:
             mt = self.config.harness.cognition.reflex_max_tokens
         return await self._continue_cutoff_reply(
@@ -2416,7 +2417,7 @@ class Entity:
             sys_prompt=sys_prompt,
             recent_messages=self._messages_for_model(user_msg),
             partial_assistant=reply_text,
-            max_tokens=min(int(mt), 1536),
+            max_tokens=None if mt is None else min(int(mt), 1536),
             sys_cap=sys_cap,
         )
 

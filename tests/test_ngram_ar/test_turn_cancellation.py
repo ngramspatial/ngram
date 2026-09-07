@@ -1,5 +1,5 @@
 import asyncio
-from types import MethodType
+from types import MethodType, SimpleNamespace
 
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
@@ -29,12 +29,15 @@ async def receive_until(ws, predicate):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("control", ["text", "button", "other_session", "timeout", "disconnect", "brain_switch"])
+@pytest.mark.parametrize("control", ["text", "button", "other_session", "timeout", "disconnect", "brain_switch", "long_turn"])
 async def test_inflight_turn_is_interruptible_and_releases_entity_lock(monkeypatch, control, tmp_path):
     monkeypatch.delenv("NGRAM_AR_ENTITY_BRIDGE_TOKEN", raising=False)
     if control == "timeout":
         monkeypatch.setattr(bridge_server, "_AR_TURN_TIMEOUT_SECONDS", 0.1)
     entity = object.__new__(Entity)
+    if control == "long_turn":
+        monkeypatch.setattr(bridge_server, "_AR_TURN_TIMEOUT_SECONDS", 0.02)
+        entity.config = SimpleNamespace(cognition=SimpleNamespace(turn_timeout_seconds=86400))
     entity.inference_control = InferenceControl(tmp_path / 'paused')
     entity._turn_lock = asyncio.Lock()
     entity._turn_activity_sinks = []
@@ -73,11 +76,14 @@ async def test_inflight_turn_is_interruptible_and_releases_entity_lock(monkeypat
         await start(ws, "first")
         await send(ws, "running", {"type": "event:user_speech", "text": "work", "isFinal": True})
         await asyncio.wait_for(started.wait(), 1)
+        if control == "long_turn":
+            await asyncio.sleep(0.06)
+            assert not cancelled.is_set()
         # A long inference must not block the socket reader or its heartbeat.
         await ws.send_json({"type": "ping"})
         await receive_until(ws, lambda message: message["type"] == "pong")
         control_ws = ws
-        if control in {"text", "button", "other_session", "brain_switch"}:
+        if control in {"text", "button", "other_session", "brain_switch", "long_turn"}:
             await send(ws, "queued", {"type": "event:user_speech", "text": "queued work", "isFinal": True})
             if control == "other_session":
                 control_ws = await client.ws_connect("/")

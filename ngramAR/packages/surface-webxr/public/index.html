@@ -941,6 +941,12 @@
       transform: scale(0.92);
     }
     .command-actions button svg { width: 17.5px; height: 17.5px; fill: currentColor; }
+    #send-btn .stop-icon { display: none; }
+    #send-btn[data-mode="stop"] { background: #6E7DFF; color: #fff; }
+    #send-btn[data-mode="stop"]:hover { background: #5f6ee8; }
+    #send-btn[data-mode="stop"] .send-icon { display: none; }
+    #send-btn[data-mode="stop"] .stop-icon { display: block; }
+    #send-btn:focus-visible { outline: 2px solid var(--text); outline-offset: 3px; }
     #mic-btn {
       background: #fff;
       color: #111;
@@ -954,6 +960,43 @@
     #mic-btn.active:hover { box-shadow: inset 0 0 0 1px #fff; }
     #mic-btn.active .mic-off-mark { display: none; }
     #mic-btn:focus-visible { outline: 2px solid var(--text); outline-offset: 3px; }
+    #context-wheel { background: transparent; width: 32px; flex-shrink: 0; }
+    #context-wheel:hover { background: var(--surface-elevated); }
+    #context-wheel:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+    #context-wheel svg { width: 23px; height: 23px; fill: none; transform: rotate(-90deg); }
+    .context-wheel-track { stroke: var(--border-focus); stroke-width: 3; }
+    .context-wheel-fill { stroke: currentColor; stroke-width: 3; stroke-linecap: round; transition: stroke-dasharray .25s; }
+    #context-wheel[data-unknown="true"] .context-wheel-track { stroke-dasharray: 2 3; }
+    #context-wheel[data-level="high"] { color: var(--warning); }
+    #context-wheel[data-level="full"] { color: var(--error); }
+    #context-wheel[data-compacting="true"] svg { animation: context-wheel-spin 2s linear infinite; }
+    @keyframes context-wheel-spin { to { transform: rotate(270deg); } }
+    @media (prefers-reduced-motion: reduce) {
+      .context-wheel-fill { transition: none; }
+      #context-wheel[data-compacting="true"] svg { animation: none; }
+    }
+    .context-tooltip {
+      position: fixed; z-index: 80; width: 325px; max-width: calc(100vw - 24px);
+      max-height: calc(100dvh - 24px); overflow-y: auto; padding: 17.5px;
+      border: 1px solid var(--border); border-radius: var(--radius-md);
+      background: var(--surface); box-shadow: var(--shadow-lg); color: var(--text);
+      font: 12.5px/1.6 var(--font-body); letter-spacing: -.035em;
+    }
+    .context-tooltip[hidden], .context-tooltip [hidden] { display: none; }
+    .context-tooltip-heading { display: flex; justify-content: space-between; align-items: center; font-size: 13.75px; font-weight: 500; }
+    #context-wheel-percent { font-size: 17.5px; }
+    #context-wheel-tokens { margin-top: 7.5px; }
+    #context-wheel-detail, #context-wheel-model, #context-price-basis, .context-price-note { color: var(--text-secondary); font-size: 11.25px; line-height: 1.6; }
+    #context-wheel-detail { margin-top: 7.5px; }
+    .context-price-section { border-top: 1px solid var(--border); margin-top: 15px; padding-top: 12.5px; }
+    #context-wheel-model { overflow-wrap: anywhere; margin: 2.5px 0 10px; }
+    .context-price-row { display: flex; justify-content: space-between; gap: 15px; margin: 5px 0; }
+    .context-price-row dt { color: var(--text-secondary); }
+    .context-price-row dd { white-space: nowrap; }
+    .context-price-estimate { border-top: 1px solid var(--border); margin-top: 10px; padding-top: 10px; }
+    #context-price-basis { margin-top: 10px; }
+    .context-price-note { margin-top: 7.5px; }
+    #context-price-source { color: var(--text-secondary); text-underline-offset: 3px; }
 
     /* ═══ Context Drawer ═══ */
     .context-drawer {
@@ -2586,20 +2629,42 @@
         <span class="command-placeholder" id="command-placeholder">Say something...</span>
       </div>
       <div class="command-actions">
+        <button id="context-wheel" aria-label="Context usage and pricing" aria-describedby="context-tooltip" type="button" data-unknown="true">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle class="context-wheel-track" cx="12" cy="12" r="9"/><circle class="context-wheel-fill" cx="12" cy="12" r="9" pathLength="100" stroke-dasharray="0 100"/></svg>
+        </button>
         <button id="mic-btn" aria-label="Start voice input" aria-pressed="false" title="Start voice input">
           <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="2" width="6" height="13" rx="3"/><path d="M5 11c0 11 14 11 14 0M12 19v4M8 23h8"/><path class="mic-off-mark" d="m3 3 18 18"/></svg>
         </button>
-        <button id="stop-turn-btn" aria-label="Stop response" title="Stop response (Esc)">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
-        </button>
-        <button id="send-btn" aria-label="Send">
-          <svg viewBox="0 0 24 24"><path d="M3.4 20.4l17.45-7.48a1 1 0 0 0 0-1.84L3.4 3.6a.993.993 0 0 0-1.39.91L2 9.12c0 .5.37.93.87.99L17 12 2.87 13.88c-.5.07-.87.5-.87 1l.01 4.61c0 .71.73 1.2 1.39.91Z"/></svg>
+        <button id="send-btn" aria-label="Send" title="Send message" type="button" data-mode="send">
+          <svg class="send-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3.4 20.4l17.45-7.48a1 1 0 0 0 0-1.84L3.4 3.6a.993.993 0 0 0-1.39.91L2 9.12c0 .5.37.93.87.99L17 12 2.87 13.88c-.5.07-.87.5-.87 1l.01 4.61c0 .71.73 1.2 1.39.91Z"/></svg>
+          <svg class="stop-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
         </button>
       </div>
     </div>
   </div>
 
   <!-- ═══ Context Drawer ═══ -->
+  <div class="context-tooltip" id="context-tooltip" role="tooltip" hidden>
+    <div class="context-tooltip-heading"><span>Context consumed</span><span id="context-wheel-percent">—</span></div>
+    <p id="context-wheel-tokens">Waiting for context usage</p>
+    <p id="context-wheel-detail">Estimated prompt size against the working context budget.</p>
+    <div class="context-price-section">
+      <div class="context-tooltip-heading">Model pricing</div>
+      <p id="context-wheel-model">Model not reported</p>
+      <div id="context-price-rates" hidden>
+        <dl>
+          <div class="context-price-row"><dt>Input</dt><dd id="context-price-input"></dd></div>
+          <div class="context-price-row"><dt>Cached input</dt><dd id="context-price-cached"></dd></div>
+          <div class="context-price-row"><dt>Output</dt><dd id="context-price-output"></dd></div>
+          <div class="context-price-row context-price-estimate"><dt>Est. input cost</dt><dd id="context-price-estimate">—</dd></div>
+        </dl>
+        <p id="context-price-basis"></p>
+        <p class="context-price-note">Estimate assumes uncached input. Output, cache writes, tools, and service-tier charges are excluded. This is not your billed total.</p>
+        <a id="context-price-source" target="_blank" rel="noopener noreferrer">Provider pricing ↗</a>
+      </div>
+      <p id="context-price-missing">Rates unavailable for this provider or model.</p>
+    </div>
+  </div>
   <aside class="context-drawer" id="context-drawer">
     <div class="resize-handle resize-handle-drawer" id="resize-drawer"></div>
     <div class="drawer-header">

@@ -367,6 +367,11 @@ export interface ContextStatusAction extends ProtocolMessage {
   inputBudgetTokens?: number;
   messagesBefore?: number;
   messagesAfter?: number;
+  model?: string;
+  provider?: string;
+}
+export interface ContextStatusEvent extends ProtocolMessage {
+  type: 'event:context_status';
 }
 export interface TurnCancelledAction extends ProtocolMessage {
     type: "action:turn_cancelled";
@@ -424,7 +429,7 @@ export interface PanelInteractionEvent extends ProtocolMessage {
     action: string;
     data?: Record<string, unknown>;
 }
-export type ShellEvent = InferenceControlEvent | CompactContextEvent | CancelTurnEvent | UserSpeechEvent | UserProximityEvent | UserGestureEvent | UserGazeEvent | SceneReadyEvent | SceneUpdateEvent | ActionCompletedEvent | ShellReadyEvent | BehaviorTriggerEvent | PanelInteractionEvent | CameraFrameEvent;
+export type ShellEvent = ContextStatusEvent | InferenceControlEvent | CompactContextEvent | CancelTurnEvent | UserSpeechEvent | UserProximityEvent | UserGestureEvent | UserGazeEvent | SceneReadyEvent | SceneUpdateEvent | ActionCompletedEvent | ShellReadyEvent | BehaviorTriggerEvent | PanelInteractionEvent | CameraFrameEvent;
 /** Surface → Gateway → Agent: a captured camera frame from the user's view. */
 export interface CameraFrameEvent extends ProtocolMessage {
     type: "event:camera_frame";

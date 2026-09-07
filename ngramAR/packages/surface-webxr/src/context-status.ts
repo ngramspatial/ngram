@@ -5,17 +5,26 @@ export interface ContextDisplayState {
   noticeUntil?: number;
   lastCompactedAt?: number;
   compacting?: boolean;
+  model?: string;
+  provider?: string;
+  source?: string;
 }
 
 /** Estimates are deliberately marked; these are not billed API token counts. */
 export function updateContextDisplay(state: ContextDisplayState, event: {
   phase: string; estimatedTokens?: number; inputBudgetTokens?: number;
+  model?: string; provider?: string; source?: string;
 }, now = Date.now()): { state: ContextDisplayState; text: string; title: string } {
   const next = { ...state };
+  if ((event.model && state.model && event.model !== state.model)
+      || (event.provider && state.provider && event.provider !== state.provider)) next.estimatedTokens = undefined;
+  if (event.model) next.model = event.model;
+  if (event.provider) next.provider = event.provider;
+  if (event.source) next.source = event.source;
   if (Number.isFinite(event.inputBudgetTokens) && event.inputBudgetTokens !== state.inputBudgetTokens
       && !Number.isFinite(event.estimatedTokens)) next.estimatedTokens = undefined;
-  if (Number.isFinite(event.estimatedTokens)) next.estimatedTokens = event.estimatedTokens;
-  if (Number.isFinite(event.inputBudgetTokens)) next.inputBudgetTokens = event.inputBudgetTokens;
+  if (Number.isFinite(event.estimatedTokens) && event.estimatedTokens! >= 0) next.estimatedTokens = event.estimatedTokens;
+  if (Number.isFinite(event.inputBudgetTokens) && event.inputBudgetTokens! > 0) next.inputBudgetTokens = event.inputBudgetTokens;
   if (event.phase === 'compacting') next.compacting = true;
   if (['compacted', 'failed', 'unchanged', 'stopped'].includes(event.phase)) next.compacting = false;
   if (event.phase === 'compacted') next.lastCompactedAt = now;

@@ -419,3 +419,36 @@ def test_large_per_turn_budgets_are_configurable(entity_config):
 
     assert entity_config.cognition.message_budget_per_turn == 48
     assert cog._agent_step_cap() == 54
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("metadata", [
+    {}, {"delegation": True, "delegation_max_steps": 150},
+    {"code_task": True, "code_task_max_steps": 150},
+    {"sustained_session": {"extra_tool_steps": 10}},
+])
+async def test_productive_work_can_pass_previous_step_caps(entity_config, metadata):
+    entity_config.cognition.tool_continuation_rounds = 9994
+    provider = _SequenceProvider([
+        *[ChatCompletionResult(content="", tool_calls=[ToolCallSpec(
+            name="write_file", arguments={"path": f"part-{i}.txt", "content": "done"}, id=f"t{i}",
+        )]) for i in range(100)],
+        ChatCompletionResult(content="The game is implemented and tested."),
+    ])
+    cog = DeliberateCognition(entity_config, provider)
+    inp = Input(text="Build the game", person_id="u", person_name="U", metadata=metadata)
+    executed = []
+
+    async def execute(spec):
+        executed.append(spec.arguments["path"])
+        return '{"ok": true}'
+
+    events = [event async for event in cog.iter_responses(
+        inp, "system", [{"role": "user", "content": inp.text}],
+        tools=[{"type": "function", "function": {"name": "write_file", "parameters": {"type": "object"}}}],
+        tool_executor=execute,
+    )]
+    assert len(executed) == 100
+    assert provider.calls == 101
+    assert events[-1].kind == "final"
+    assert events[-1].display_text == "The game is implemented and tested."

@@ -17,7 +17,7 @@ class InferenceProvider(Protocol):
         tools: Optional[list[dict[str, Any]]] = None,
         tool_choice: Optional[str] = None,
         temperature: float = 0.7,
-        max_tokens: int = 1024,
+        max_tokens: int | None = 1024,
         think: bool = False,
         stream: bool = False,
         num_ctx: int | None = None,
