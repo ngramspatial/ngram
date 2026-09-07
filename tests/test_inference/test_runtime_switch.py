@@ -8,6 +8,7 @@ import pytest
 import ngram.entity as entity_module
 from ngram.config import EntityCognition, HarnessConfig, InferenceSettings
 from ngram.entity import Entity
+from ngram.inference.control import InferenceControl
 
 
 class StubProvider:
@@ -39,7 +40,7 @@ class StubProvider:
 
 
 @pytest.mark.asyncio
-async def test_runtime_switch_rebinds_every_long_lived_inference_consumer(monkeypatch) -> None:
+async def test_runtime_switch_rebinds_every_long_lived_inference_consumer(monkeypatch, tmp_path) -> None:
     config = SimpleNamespace(
         name="test",
         harness=HarnessConfig(inference=InferenceSettings(provider="remote_gateway", base_url="https://private.invalid")),
@@ -66,6 +67,7 @@ async def test_runtime_switch_rebinds_every_long_lived_inference_consumer(monkey
     entity._startup_deliberate_model = "local-model"
     entity._startup_embedding_model = "nomic-embed-text"
     entity._turn_lock = asyncio.Lock()
+    entity.inference_control = InferenceControl(tmp_path / "paused")
     entity._inference_switch_lock = asyncio.Lock()
     entity.knowledge = SimpleNamespace(client=old)
     entity.procedural = SimpleNamespace(client=old)
@@ -93,7 +95,7 @@ async def test_runtime_switch_rebinds_every_long_lived_inference_consumer(monkey
     }
     assert seen == {"provider": "openai", "token": "runtime-secret"}
     assert old.closed is True
-    assert entity.client is replacement
+    assert entity.client.provider is replacement
     remembered = await entity.client.embed("text-embedding-3-small", "remember")
     assert len(remembered) == 768
     assert remembered[0] == 1.0
@@ -107,7 +109,7 @@ async def test_runtime_switch_rebinds_every_long_lived_inference_consumer(monkey
 
 
 @pytest.mark.asyncio
-async def test_runtime_switch_can_explicitly_keep_existing_embeddings(monkeypatch) -> None:
+async def test_runtime_switch_can_explicitly_keep_existing_embeddings(monkeypatch, tmp_path) -> None:
     config = SimpleNamespace(
         name="test",
         harness=HarnessConfig(inference=InferenceSettings(provider="local")),
@@ -125,6 +127,7 @@ async def test_runtime_switch_can_explicitly_keep_existing_embeddings(monkeypatc
     entity._startup_deliberate_model = "local-model"
     entity._startup_embedding_model = "nomic-embed-text"
     entity._turn_lock = asyncio.Lock()
+    entity.inference_control = InferenceControl(tmp_path / "paused")
     entity._inference_switch_lock = asyncio.Lock()
     entity.knowledge = SimpleNamespace(client=old)
     entity.procedural = SimpleNamespace(client=old)
@@ -141,13 +144,13 @@ async def test_runtime_switch_can_explicitly_keep_existing_embeddings(monkeypatc
 
     assert status["embeddingMode"] == "existing"
     assert status["embeddingDimensions"] is None
-    assert entity.client.chat_provider is replacement
+    assert entity.client.chat_provider.provider is replacement
     assert entity.client.embedding_provider is old
     assert old.closed is False
 
 
 @pytest.mark.asyncio
-async def test_runtime_switch_rejects_bad_hosted_embeddings_without_mutating_entity(monkeypatch) -> None:
+async def test_runtime_switch_rejects_bad_hosted_embeddings_without_mutating_entity(monkeypatch, tmp_path) -> None:
     config = SimpleNamespace(
         name="test",
         harness=HarnessConfig(inference=InferenceSettings(provider="local")),
@@ -165,6 +168,7 @@ async def test_runtime_switch_rejects_bad_hosted_embeddings_without_mutating_ent
     entity._startup_deliberate_model = "local-model"
     entity._startup_embedding_model = "nomic-embed-text"
     entity._turn_lock = asyncio.Lock()
+    entity.inference_control = InferenceControl(tmp_path / "paused")
     entity._inference_switch_lock = asyncio.Lock()
     entity.knowledge = SimpleNamespace(client=old)
     entity.procedural = SimpleNamespace(client=old)

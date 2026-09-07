@@ -54,6 +54,7 @@ from ngram.identity.personality import PersonalityEngine
 from ngram.identity.soma import TonicBody
 from ngram.identity.voice import VoiceController
 from ngram.inference import InferenceProvider, build_inference_provider
+from ngram.inference.control import ControlledInferenceProvider, InferenceControl, InferencePausedError
 from ngram.inference.factory import INFERENCE_PROVIDERS, effective_inference_provider_name
 from ngram.inference.providers import SplitInferenceProvider
 from ngram.memory.beliefs import BeliefStore
@@ -465,7 +466,11 @@ class Entity:
 
             self._live_container_mount = LiveContainerMount(config)
             self._live_container_mount.prepare()
-        self.client: InferenceProvider = build_inference_provider(config.harness)
+        self.inference_control = InferenceControl(Path(config.journal_path()).parent / ".inference-paused")
+        self._active_perception: asyncio.Task | None = None
+        self.client: InferenceProvider = ControlledInferenceProvider(
+            build_inference_provider(config.harness), self.inference_control,
+        )
         self._embedding_client: InferenceProvider = self.client
         self._startup_inference = copy.deepcopy(config.harness.inference)
         self._startup_reflex_model = config.cognition.reflex_model
@@ -569,6 +574,15 @@ class Entity:
         # history, soma, relationships, or conversation routing.
         self._turn_lock = asyncio.Lock()
         self._inference_switch_lock = asyncio.Lock()
+
+    @property
+    def inference_paused(self) -> bool:
+        return self.inference_control.paused
+
+    def set_inference_paused(self, paused: bool) -> None:
+        self.inference_control.set_paused(paused)
+        if paused and self._active_perception is not None:
+            self._active_perception.cancel()
 
     def register_proactive_sink(self, fn: Callable[[str], Awaitable[None]]) -> None:
         self._proactive_sends.append(fn)
@@ -764,7 +778,10 @@ class Entity:
             embedding_model = self.config.harness.models.embedding
 
         async with self._inference_switch_lock:
-            chat_replacement = build_inference_provider(candidate, bearer_token=token_override)
+            self.inference_control.require_running()
+            chat_replacement = ControlledInferenceProvider(
+                build_inference_provider(candidate, bearer_token=token_override), self.inference_control,
+            )
             try:
                 listed = await asyncio.wait_for(chat_replacement.list_models(), timeout=30.0)
                 model_verified = model in set(listed)
@@ -1683,6 +1700,8 @@ class Entity:
 
     async def compact_context_now(self, *, aggressive: bool = False, passes: int = 1) -> dict[str, Any]:
         """Run manual context compaction immediately and return a compact status snapshot."""
+        if self.inference_paused:
+            return {"ok": False, "reason": "inference_paused"}
         hc = self.config.cognition.history_compression
         if not hc.enabled:
             return {"ok": False, "reason": "history_compression_disabled"}
@@ -2459,9 +2478,11 @@ class Entity:
         defer_turn_activity_finish: bool = False,
     ) -> tuple[str, bool]:
         async with self._turn_lock:
+            if self.inference_paused:
+                return "Inference is paused. Resume inference to continue.", False
             await self._emit_turn_activity("started", inp)
             try:
-                return await self._perceive_once(
+                self._active_perception = asyncio.create_task(self._perceive_once(
                     inp,
                     stream=stream,
                     record_user_message=record_user_message,
@@ -2474,8 +2495,14 @@ class Entity:
                     skip_episode=skip_episode,
                     tool_names_log=tool_names_log,
                     spatial_actions_out=spatial_actions_out,
-                )
+                ))
+                return await self._active_perception
+            except (InferencePausedError, asyncio.CancelledError):
+                if self.inference_paused:
+                    return "Inference is paused. Resume inference to continue.", False
+                raise
             finally:
+                self._active_perception = None
                 if not defer_turn_activity_finish:
                     await self.finish_turn_activity(inp)
 

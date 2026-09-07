@@ -109,6 +109,8 @@ class PresenceDaemon:
             self._scheduler = None
 
     async def _heartbeat_tick(self) -> None:
+        if getattr(self.entity, "inference_paused", False) is True:
+            return
         structlog.contextvars.bind_contextvars(
             entity_name=self.cfg.name,
             module="presence",
@@ -224,6 +226,8 @@ class PresenceDaemon:
                 log.exception("heartbeat_checkpoint_failed", module="presence", error=str(e))
 
     async def _consolidation_tick(self) -> None:
+        if getattr(self.entity, "inference_paused", False) is True:
+            return
         structlog.contextvars.bind_contextvars(
             entity_name=self.cfg.name,
             module="presence",

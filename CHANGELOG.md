@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Added a persistent, shared inference pause with Telegram operator commands and a spatial pause/resume control. Pausing cancels active model work and blocks new chat, embedding, and background requests.
+- Fixed Telegram `/compact` to summarize older turns instead of clearing history, without blocking incoming control commands.
+- Made Telegram context displays follow the active provider's working budget and report automatic compaction progress.
+
 - Added a one-command, trusted-LAN Quest lab bootstrap and process supervisor.
 - Made hosted inference self-contained across chat and memory embeddings, with live readiness probes and memory-width validation.
 - Added server-side provider profiles and a fully hosted memory selector to the WebXR settings UI.

@@ -7,13 +7,15 @@ import pytest
 
 import ngram.entity as entity_module
 from ngram.entity import Entity
+from ngram.inference.control import InferenceControl
 from ngram.models import Input
 
 
 @pytest.mark.asyncio
-async def test_entity_serializes_turns_from_multiple_surfaces() -> None:
+async def test_entity_serializes_turns_from_multiple_surfaces(tmp_path) -> None:
     entity = object.__new__(Entity)
     entity._turn_lock = asyncio.Lock()
+    entity.inference_control = InferenceControl(tmp_path / "paused")
     active = 0
     max_active = 0
 
@@ -48,9 +50,10 @@ async def test_entity_serializes_turns_from_multiple_surfaces() -> None:
 
 
 @pytest.mark.asyncio
-async def test_entity_emits_turn_activity_start_and_finish_even_on_failure() -> None:
+async def test_entity_emits_turn_activity_start_and_finish_even_on_failure(tmp_path) -> None:
     entity = object.__new__(Entity)
     entity._turn_lock = asyncio.Lock()
+    entity.inference_control = InferenceControl(tmp_path / "paused")
     entity._turn_activity_sinks = []
     events: list[dict[str, object]] = []
 
@@ -84,9 +87,10 @@ async def test_entity_emits_turn_activity_start_and_finish_even_on_failure() -> 
 
 
 @pytest.mark.asyncio
-async def test_entity_can_defer_activity_finish_through_reply_delivery() -> None:
+async def test_entity_can_defer_activity_finish_through_reply_delivery(tmp_path) -> None:
     entity = object.__new__(Entity)
     entity._turn_lock = asyncio.Lock()
+    entity.inference_control = InferenceControl(tmp_path / "paused")
     entity._turn_activity_sinks = []
     events: list[dict[str, object]] = []
 
@@ -121,9 +125,10 @@ async def test_entity_can_defer_activity_finish_through_reply_delivery() -> None
 
 
 @pytest.mark.asyncio
-async def test_entity_labels_non_message_spatial_cognition() -> None:
+async def test_entity_labels_non_message_spatial_cognition(tmp_path) -> None:
     entity = object.__new__(Entity)
     entity._turn_lock = asyncio.Lock()
+    entity.inference_control = InferenceControl(tmp_path / "paused")
     entity._turn_activity_sinks = []
     events: list[dict[str, object]] = []
 
@@ -151,9 +156,10 @@ async def test_entity_labels_non_message_spatial_cognition() -> None:
 
 
 @pytest.mark.asyncio
-async def test_entity_fans_out_turn_activity_to_sinks_concurrently() -> None:
+async def test_entity_fans_out_turn_activity_to_sinks_concurrently(tmp_path) -> None:
     entity = object.__new__(Entity)
     entity._turn_lock = asyncio.Lock()
+    entity.inference_control = InferenceControl(tmp_path / "paused")
     entity._turn_activity_sinks = []
     first_started = asyncio.Event()
     second_started = asyncio.Event()
@@ -200,11 +206,11 @@ async def test_entity_fans_out_turn_activity_to_sinks_concurrently() -> None:
 
 @pytest.mark.asyncio
 async def test_stale_activity_sink_is_bounded_evicted_and_cannot_block_turn(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+    monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     monkeypatch.setattr(entity_module, "_TURN_ACTIVITY_SINK_TIMEOUT_SECONDS", 0.02)
     entity = object.__new__(Entity)
     entity._turn_lock = asyncio.Lock()
+    entity.inference_control = InferenceControl(tmp_path / "paused")
     entity._turn_activity_sinks = []
     stale_cancelled = asyncio.Event()
     release_stale_cleanup = asyncio.Event()

@@ -21,6 +21,7 @@ from telegram.error import RetryAfter, TelegramError
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 from telegram.helpers import escape_markdown
 
+from ngram.cognition.context_status import context_reporter
 from ngram.models import Input
 from ngram.presence.platforms.base import Platform
 from ngram.presence.platforms.telegram_format import (
@@ -92,7 +93,7 @@ log = structlog.get_logger("ngram.presence.telegram")
 _UPDATE_DEDUP_CAP = 8192
 # (chat_id, message_id) — skip re-entrancy / redelivery before or during LLM work.
 _MESSAGE_DEDUP_CAP = 8192
-_OPERATOR_MENU_COMMANDS = frozenset({"private", "privacy", "update"})
+_OPERATOR_MENU_COMMANDS = frozenset({"private", "privacy", "update", "pause", "resume"})
 _REMOTE_SESSION_MENU_COMMANDS = frozenset(
     {"session_start", "session_status", "session_stop"}
 )
@@ -417,8 +418,12 @@ class TelegramPlatform(Platform):
         self.app.add_handler(CommandHandler("wakequiet", self._on_wakequiet_command), group=_g)
         self.app.add_handler(CommandHandler("update", self._on_update_command), group=_g)
         self.app.add_handler(CommandHandler("context", self._on_context_command), group=_g)
-        self.app.add_handler(CommandHandler("compact", self._on_compact_command), group=_g)
+        # Compaction may wait for a turn or provider. Keep pause/resume responsive
+        # even when Telegram processes only one update at a time.
+        self.app.add_handler(CommandHandler("compact", self._on_compact_command, block=False), group=_g)
         self.app.add_handler(CommandHandler("reset", self._on_reset_command), group=_g)
+        self.app.add_handler(CommandHandler("pause", self._on_pause_command), group=_g)
+        self.app.add_handler(CommandHandler("resume", self._on_resume_command), group=_g)
         self.app.add_handler(CommandHandler("session_start", self._on_session_start), group=_g)
         self.app.add_handler(CommandHandler("session_status", self._on_session_status), group=_g)
         self.app.add_handler(CommandHandler("session_stop", self._on_session_stop), group=_g)
@@ -1050,9 +1055,21 @@ class TelegramPlatform(Platform):
             except (TypeError, ValueError):
                 chat_id = None
 
+        async def _report_context(event: dict[str, Any]) -> None:
+            if chat_id is None or not event.get("automatic"):
+                return
+            message = {
+                "compacting": "Compacting older context…",
+                "compacted": "Context compacted. Recent turns and a summary of older context are retained.",
+                "failed": "Compaction failed. Conversation history has not been reset.",
+            }.get(event.get("phase", ""))
+            if message:
+                await self._send_html_chunks(chat_id, message)
+
         async def _invoke() -> None:
             if chat_id is not None:
                 await self._cancel_active_chat_task(chat_id)
+            report_token = context_reporter.set(_report_context)
             try:
                 await self._cb(inp)
             except asyncio.CancelledError:
@@ -1062,6 +1079,7 @@ class TelegramPlatform(Platform):
                     await self._release_telegram_message_claim(key[0], key[1])
                 log.warning("telegram_callback_failed", error=str(e))
             finally:
+                context_reporter.reset(report_token)
                 # Clean up tracking when task completes or is cancelled.
                 if chat_id is not None:
                     async with self._chat_active_tasks_lock:
@@ -1797,7 +1815,7 @@ class TelegramPlatform(Platform):
         _ = context
         ent = self._entity
         cfg = ent.config
-        max_ctx = int(cfg.cognition.max_context_tokens or cfg.harness.cognition.max_context_tokens)
+        max_ctx = cfg.effective_context_tokens()
         history = getattr(ent, "_history", [])
         summary = (getattr(ent, "_history_rolling_summary", "") or "").strip()
 
@@ -1818,7 +1836,7 @@ class TelegramPlatform(Platform):
         bar = "\u2588" * filled + "\u2591" * (bar_width - filled)
 
         body = (
-            f"<b>Context window</b>\n\n"
+            f"<b>Context window</b>\nApproximate usage, not provider billing.\n\n"
             f"<code>{bar} {pct_used}%</code>\n\n"
             f"<b>Budget:</b> {max_ctx:,} tokens\n"
             f"<b>Estimated used:</b> ~{total_est:,}\n"
@@ -1832,7 +1850,7 @@ class TelegramPlatform(Platform):
             body += f"  Rolling summary: ~{summary_chars // 4:,} tokens\n"
         body += (
             f"\n<b>Config:</b>\n"
-            f"  max_context_tokens: {max_ctx:,}\n"
+            f"  Effective working budget: {max_ctx:,}\n"
             f"  deliberate_max_tokens: {int(cfg.cognition.deliberate_max_tokens or cfg.harness.cognition.deliberate_max_tokens):,}\n"
             f"  reflex_max_tokens: {cfg.harness.cognition.reflex_max_tokens:,}\n"
             f"  history messages: {len(history)} / {cfg.cognition.rolling_history_max_messages}\n"
@@ -1855,9 +1873,9 @@ class TelegramPlatform(Platform):
                 (
                     "<b>Context refresh</b>\n\n"
                     "Usage:\n"
-                    "• <code>/compact</code> — clear rolling chat turns now\n"
+                    "• <code>/compact</code> — summarize older turns, keeping recent context\n"
                     "• <code>/compact status</code> — show current history footprint\n\n"
-                    "This refreshes the live context window. Persistent SQLite memories are untouched."
+                    "Compaction uses inference. Use /reset only when you want to clear live conversation history."
                 ),
             )
             return
@@ -1879,9 +1897,54 @@ class TelegramPlatform(Platform):
             )
             return
 
-        _ = aggressive, passes
-        self._entity.clear_conversation_history()
-        await self._reply_html(update, format_reset_html(self._entity.config.name))
+        await self._reply_html(update, "Summarizing older turns; recent context and durable memories stay available.")
+        try:
+            async with ent._turn_lock:
+                result = await ent.compact_context_now(aggressive=aggressive, passes=passes)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.warning("telegram_compaction_failed")
+            await self._reply_html(update, "Compaction failed. Your conversation history has not been reset.")
+            return
+        if result.get("compacted"):
+            await self._reply_html(update, (
+                "<b>Context compacted</b>\n"
+                f"Live messages: {int(result['messages_before'])} → {int(result['messages_after'])}.\n"
+                "Older context is retained in the rolling summary. Durable memories are unchanged."
+            ))
+        else:
+            reason = result.get("reason", "")
+            message = {
+                "inference_paused": "Inference is paused. Resume it before compacting.",
+                "history_compression_disabled": "History compression is disabled in the Entity configuration.",
+            }.get(reason, "Nothing to compact yet. Your conversation history is unchanged.")
+            await self._reply_html(update, message)
+
+    async def _set_inference_pause(self, update: Update, paused: bool) -> None:
+        if not await self._take_update_if_fresh(update):
+            return
+        if not await self._check_allowed(update, notify=True):
+            return
+        user = update.effective_user
+        if not self._operators_configured():
+            await self._reply_html(update, format_privacy_no_operators_html())
+            return
+        if not self._is_operator(int(user.id) if user else None):
+            await self._reply_html(update, format_privacy_operator_required_html())
+            return
+        self._entity.set_inference_paused(paused)
+        await self._reply_html(update, (
+            "<b>Inference paused.</b> Active model work is being cancelled. Chat, embeddings, "
+            "and background inference stay paused across restarts. Use /resume to continue."
+            if paused else "<b>Inference resumed.</b> Chat and background activity can use the model again."
+        ))
+
+    async def _on_pause_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        await self._set_inference_pause(update, True)
+
+    async def _on_resume_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        await self._set_inference_pause(update, False)
 
     async def _on_reset_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not await self._take_update_if_fresh(update):

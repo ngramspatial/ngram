@@ -364,6 +364,23 @@ tests/          Offline-first Python regression suite
 See [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), and the
 [v1.0.0 changelog](CHANGELOG.md).
 
+## Runtime controls
+
+Use **Pause inference** in the spatial surface, or `/pause` from a configured
+Telegram operator, to cancel active model work and block new chat, embedding,
+and background inference for the shared Entity. `/resume` or the spatial
+**Resume** control restores model use. The pause marker is stored beside the
+Entity's journal and survives restarts when that storage persists.
+
+Closing a surface leaves the Entity available to other surfaces. **Stop response**
+cancels the current spatial work; **Pause inference** also stops future background
+model requests. Requests already processed by a provider can still be billed.
+
+`/compact` summarizes older conversation turns while retaining recent context.
+`/reset` clears the live conversation. Neither command deletes durable memory.
+`/context` reports the active model's effective working budget and approximate
+usage; automatic compaction reports its progress in Telegram and spatial.
+
 ## License
 
 The Python runtime and root project are Apache-2.0. The `ngramAR` component is

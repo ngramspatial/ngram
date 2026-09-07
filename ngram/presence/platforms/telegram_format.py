@@ -59,6 +59,8 @@ def split_telegram_chunks(text: str, limit: int = 4096) -> list[str]:
 
 
 COMMAND_REGISTRY: list[TelegramCommandSpec] = [
+    TelegramCommandSpec("pause", "Pause all Entity inference", "/pause", "Operator"),
+    TelegramCommandSpec("resume", "Resume Entity inference", "/resume", "Operator"),
     TelegramCommandSpec(
         name="start",
         summary="Start a conversation",
@@ -175,7 +177,7 @@ COMMAND_REGISTRY: list[TelegramCommandSpec] = [
     ),
     TelegramCommandSpec(
         name="compact",
-        summary="Refresh context by clearing rolling chat turns",
+        summary="Summarize older turns while preserving recent context",
         usage="/compact [status]",
         category="Runtime",
     ),
@@ -478,7 +480,7 @@ async def build_status_html(entity: "Entity", app_version: str) -> str:
         drive_line=dominant_drive_line(entity.drives.all_drives()),
         episode_count=n_ep,
         reflex_model=cfg.cognition.reflex_model,
-        max_context_tokens=cfg.cognition.max_context_tokens,
+        max_context_tokens=cfg.effective_context_tokens(),
         tool_count=len(entity.tools.openai_tools()),
         awake_summary=awake,
         people_count=n_people,
@@ -998,7 +1000,7 @@ def format_models_html(entity: "Entity") -> str:
         f"  Embedding: <code>{html.escape(cfg.harness.models.embedding)}</code>\n\n"
         f"<b>Settings</b>\n\n"
         f"  Thinking mode: {html.escape(think)}\n"
-        f"  Context window: {cfg.cognition.max_context_tokens:,} tokens\n"
+        f"  Context window: {cfg.effective_context_tokens():,} tokens\n"
         f"  Tools registered: {len(entity.tools.openai_tools())}"
     )
 

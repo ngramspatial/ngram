@@ -8,6 +8,7 @@ import pytest
 from aiohttp.test_utils import TestClient, TestServer
 
 from ngram.entity import Entity
+from ngram.inference.control import InferenceControl
 from ngram.models import Input
 from ngram.ngram_ar.bridge_server import (
     _BufferedArPlatform,
@@ -113,12 +114,14 @@ def test_default_unpaired_person_does_not_disable_message_presence(
 @pytest.mark.asyncio
 async def test_gateway_session_drives_texting_on_another_spatial_session(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
 ) -> None:
     """Exercise the actual local-gateway -> Entity -> spatial websocket path."""
     monkeypatch.delenv("NGRAM_AR_ENTITY_BRIDGE_TOKEN", raising=False)
     monkeypatch.setenv("NGRAM_AR_PERSON_ID", "ar_user")
 
     entity = object.__new__(Entity)
+    entity.inference_control = InferenceControl(tmp_path / 'paused')
     entity._turn_lock = asyncio.Lock()
     entity._turn_activity_sinks = []
     entity.current_platform = None
@@ -197,11 +200,13 @@ async def test_gateway_session_drives_texting_on_another_spatial_session(
 @pytest.mark.asyncio
 async def test_external_texting_prioritizes_then_restores_overlapping_spatial_turn(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
 ) -> None:
     monkeypatch.delenv("NGRAM_AR_ENTITY_BRIDGE_TOKEN", raising=False)
     monkeypatch.setenv("NGRAM_AR_PERSON_ID", "ar_user")
 
     entity = object.__new__(Entity)
+    entity.inference_control = InferenceControl(tmp_path / 'paused')
     entity._turn_lock = asyncio.Lock()
     entity._turn_activity_sinks = []
     entity.current_platform = None

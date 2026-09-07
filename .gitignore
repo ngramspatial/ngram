@@ -69,6 +69,7 @@ Thumbs.db
 Desktop.ini
 
 # Personal runtime state and deployment linkage
+.inference-paused
 .agents/
 .codex/
 .cloudflared/

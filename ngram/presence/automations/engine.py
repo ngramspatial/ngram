@@ -213,6 +213,8 @@ class AutomationEngine:
         self._active_jobs.pop(auto_id, None)
 
     async def execute(self, automation_id: str) -> dict[str, Any]:
+        if getattr(self.entity, "inference_paused", False) is True:
+            return {"ok": False, "skipped": True, "reason": "inference_paused"}
         cfg = self.entity.config.automations
         started = time.time()
         auto = await self.store.get_automation(automation_id)

@@ -709,6 +709,24 @@ async def websocket_handler(request: web.Request) -> web.WebSocketResponse:
                         continue
                     et = str(event.get("type") or "")
                     spatial_context = _update_spatial_context(spatial_context, event)
+                    if et == "event:inference_control":
+                        command = event.get("command")
+                        if command not in {"pause", "resume", "status"}:
+                            await _send_actions(ws, eid, [])
+                            continue
+                        if command != "status":
+                            entity.set_inference_paused(command == "pause")
+                        if command == "pause":
+                            to_cancel = list(shared_turn_tasks)
+                            for task in to_cancel:
+                                task.cancel()
+                            await asyncio.gather(*to_cancel, return_exceptions=True)
+                            await send_proactive([cancelled_action("stopped")])
+                        await _send_actions(ws, eid, [{
+                            "type": "action:inference_status", "paused": entity.inference_paused,
+                            "sessionId": bridge_session_id, "timestamp": int(time.time() * 1000),
+                        }])
+                        continue
                     if _is_stop_event(event):
                         # Control traffic is handled by the reader, outside the
                         # turn queue and without asking any model for permission.

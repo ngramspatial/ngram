@@ -635,6 +635,18 @@ async function main() {
     behaviorEngine = new BehaviorEngine(behaviors);
   });
 
+  // Inference status is model-free and belongs to the shared Entity.
+  const inferenceButton = document.getElementById('inference-control') as HTMLButtonElement | null;
+  let inferencePaused = false;
+  let inferencePoll: ReturnType<typeof setInterval> | undefined;
+  function queryInferenceStatus(): void {
+    connection.send({ type: 'event:inference_control', command: 'status' });
+  }
+  inferenceButton?.addEventListener('click', () => {
+    inferenceButton.disabled = true;
+    connection.send({ type: 'event:inference_control', command: inferencePaused ? 'resume' : 'pause' });
+  });
+
   // --- Connection status ---
   connection.onStatusChange((status) => {
     switch (status) {
@@ -643,12 +655,17 @@ async function main() {
         ui.setShellInfo(shellName, 'connected', true);
         ui.addNotification(`Connected to ${shellName}`);
         sendShellReady();
+        queryInferenceStatus();
+        clearInterval(inferencePoll);
+        inferencePoll = setInterval(queryInferenceStatus, 10000);
         break;
       case 'connecting':
         ui.setStatus('connecting…', false);
         ui.setShellInfo(shellName, 'connecting…', false);
         break;
       default:
+        clearInterval(inferencePoll);
+        if (inferenceButton) inferenceButton.disabled = true;
         ui.setStatus('disconnected', false);
         ui.setShellInfo(shellName, 'disconnected', false);
         ui.addNotification(`Disconnected from ${shellName}`);
@@ -850,6 +867,18 @@ async function main() {
         ui.hideBusy();
         ui.showSubtitle(shellName, (msg as any).reason === 'timeout'
           ? 'Turn stopped at the time limit.' : 'Stopped.', 2500);
+        break;
+      case 'action:inference_status':
+        inferencePaused = msg.paused;
+        if (inferenceButton) {
+          inferenceButton.disabled = false;
+          inferenceButton.textContent = inferencePaused ? 'Inference paused · Resume' : 'Pause inference';
+          inferenceButton.setAttribute('aria-pressed', String(inferencePaused));
+          inferenceButton.title = inferencePaused
+            ? 'Resume chat and background inference for this Entity'
+            : 'Pause chat, embeddings, and background inference. Other surfaces share this control.';
+        }
+        if (inferencePaused) clearResponsePlayback();
         break;
       case 'action:context_status':
         handleContextStatus(msg);

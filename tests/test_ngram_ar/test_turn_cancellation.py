@@ -5,6 +5,7 @@ import pytest
 from aiohttp.test_utils import TestClient, TestServer
 
 from ngram.entity import Entity
+from ngram.inference.control import InferenceControl
 from ngram.ngram_ar import bridge_server
 
 
@@ -29,11 +30,12 @@ async def receive_until(ws, predicate):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("control", ["text", "button", "other_session", "timeout", "disconnect", "brain_switch"])
-async def test_inflight_turn_is_interruptible_and_releases_entity_lock(monkeypatch, control):
+async def test_inflight_turn_is_interruptible_and_releases_entity_lock(monkeypatch, control, tmp_path):
     monkeypatch.delenv("NGRAM_AR_ENTITY_BRIDGE_TOKEN", raising=False)
     if control == "timeout":
         monkeypatch.setattr(bridge_server, "_AR_TURN_TIMEOUT_SECONDS", 0.1)
     entity = object.__new__(Entity)
+    entity.inference_control = InferenceControl(tmp_path / 'paused')
     entity._turn_lock = asyncio.Lock()
     entity._turn_activity_sinks = []
     entity.current_platform = None

@@ -296,7 +296,7 @@ export interface TerminalOutputAction extends ProtocolMessage {
     /** If true, clear all previous terminal content */
     clear?: boolean;
 }
-export type SpatialAction = ContextStatusAction | TurnCancelledAction | SpeakAction | EmoteAction | MoveToAction | LookAtAction | GestureAction | ShowPanelAction | HidePanelAction | SetModeAction | FollowAction | HighlightAction | GoIdleAction | SpawnAction | SetAgentStateAction | SpeakStreamStartAction | SpeakStreamDeltaAction | SpeakStreamEndAction | SpawnObjectAction | SpawnTextAction | SpawnImageAction | SpawnToyAction | RemoveObjectAction | ClearObjectsAction | DrawLineAction | DrawArrowAction | DrawAnnotationAction | ClearDrawingsAction | SetEnvironmentAction | SetLightingAction | SpawnParticlesAction | ClearEnvironmentAction | PlayAudioAction | StopAudioAction | PauseAudioAction | SetAudioVolumeAction | PlayYouTubeAction | ControlYouTubeAction | TerminalOutputAction | SpawnModelAction | UpdateAppPanelAction | SetBackgroundAction | OpenBrowserAction | ControlBrowserAction | GenerateMotionAction | PlayMotionClipAction | ErrorAction | RequestCaptureAction;
+export type SpatialAction = InferenceStatusAction | ContextStatusAction | TurnCancelledAction | SpeakAction | EmoteAction | MoveToAction | LookAtAction | GestureAction | ShowPanelAction | HidePanelAction | SetModeAction | FollowAction | HighlightAction | GoIdleAction | SpawnAction | SetAgentStateAction | SpeakStreamStartAction | SpeakStreamDeltaAction | SpeakStreamEndAction | SpawnObjectAction | SpawnTextAction | SpawnImageAction | SpawnToyAction | RemoveObjectAction | ClearObjectsAction | DrawLineAction | DrawArrowAction | DrawAnnotationAction | ClearDrawingsAction | SetEnvironmentAction | SetLightingAction | SpawnParticlesAction | ClearEnvironmentAction | PlayAudioAction | StopAudioAction | PauseAudioAction | SetAudioVolumeAction | PlayYouTubeAction | ControlYouTubeAction | TerminalOutputAction | SpawnModelAction | UpdateAppPanelAction | SetBackgroundAction | OpenBrowserAction | ControlBrowserAction | GenerateMotionAction | PlayMotionClipAction | ErrorAction | RequestCaptureAction;
 export interface SpatialContextSnapshot {
     version: "1.0";
     observedAt: number;
@@ -344,6 +344,14 @@ export interface UserSpeechEvent extends ProtocolMessage {
 }
 export interface CancelTurnEvent extends ProtocolMessage {
     type: "event:cancel_turn";
+}
+export interface InferenceControlEvent extends ProtocolMessage {
+    type: 'event:inference_control';
+    command: 'pause' | 'resume' | 'status';
+}
+export interface InferenceStatusAction extends ProtocolMessage {
+    type: 'action:inference_status';
+    paused: boolean;
 }
 export interface CompactContextEvent extends ProtocolMessage {
   type: 'event:compact_context';
@@ -411,7 +419,7 @@ export interface PanelInteractionEvent extends ProtocolMessage {
     action: string;
     data?: Record<string, unknown>;
 }
-export type ShellEvent = CompactContextEvent | CancelTurnEvent | UserSpeechEvent | UserProximityEvent | UserGestureEvent | UserGazeEvent | SceneReadyEvent | SceneUpdateEvent | ActionCompletedEvent | ShellReadyEvent | BehaviorTriggerEvent | PanelInteractionEvent | CameraFrameEvent;
+export type ShellEvent = InferenceControlEvent | CompactContextEvent | CancelTurnEvent | UserSpeechEvent | UserProximityEvent | UserGestureEvent | UserGazeEvent | SceneReadyEvent | SceneUpdateEvent | ActionCompletedEvent | ShellReadyEvent | BehaviorTriggerEvent | PanelInteractionEvent | CameraFrameEvent;
 /** Surface → Gateway → Agent: a captured camera frame from the user's view. */
 export interface CameraFrameEvent extends ProtocolMessage {
     type: "event:camera_frame";

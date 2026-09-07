@@ -538,6 +538,9 @@ def test_build_status_html_reports_soma_gen_snapshot():
         harness = _Harness()
         raw = {"created": "2026-04-09T00:00:00Z"}
 
+        def effective_context_tokens(self):
+            return self.cognition.max_context_tokens
+
         def soma_dir(self):
             return __import__("tempfile").gettempdir() + "/ngram-test-soma-status"
 
