@@ -64,7 +64,7 @@ export interface VoiceProfile {
     voice: string;
     apiKey?: string;
     speed?: number;
-    /** Cartesia model ID (default: sonic-2025-04-16) */
+    /** Cartesia model ID (default: sonic-3.6) */
     model?: string;
     /** Cartesia emotion tag (e.g. "calm", "curious", "content") */
     emotion?: string;

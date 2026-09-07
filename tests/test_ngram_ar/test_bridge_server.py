@@ -10,6 +10,10 @@ from aiohttp.test_utils import TestClient, TestServer
 from ngram.entity import Entity
 from ngram.inference.control import InferenceControl
 from ngram.models import Input
+from ngram.ngram_ar.spatial_tools import register_ngram_ar_spatial_tools
+from ngram.presence.tools.registry import ToolRegistry
+from ngram.presence.tools.runtime import ToolRuntimeContext, reset_tool_runtime, set_tool_runtime
+from ngram.utils.ollama_client import ToolCallSpec
 from ngram.ngram_ar.bridge_server import (
     _BufferedArPlatform,
     _check_token,
@@ -22,6 +26,78 @@ from ngram.ngram_ar.bridge_server import (
     create_bridge_app,
     health_handler,
 )
+
+
+@pytest.mark.asyncio
+async def test_telegram_tool_reaches_ready_body_and_receives_ack_without_perceive(monkeypatch):
+    monkeypatch.delenv("NGRAM_AR_ENTITY_BRIDGE_TOKEN", raising=False)
+    entity = object.__new__(Entity)
+    entity._turn_lock = asyncio.Lock()
+    entity._turn_activity_sinks = []
+    client = TestClient(TestServer(await create_bridge_app(entity)))
+    await client.start_server()
+    ws = await client.ws_connect("/")
+    registry = ToolRegistry()
+    register_ngram_ar_spatial_tools(registry)
+    state = {}
+    token = set_tool_runtime(ToolRuntimeContext(
+        entity=entity,
+        inp=Input("spawn a purple ball", "person", "Person", platform="telegram", channel="123"),
+        state=state,
+    ))
+    try:
+        await ws.send_json({"type": "session.start", "sessionId": "desktop-body"})
+        assert (await ws.receive_json())["type"] == "session.ready"
+        # Message API sockets alone are not bodies.
+        assert entity._ngram_ar_sessions.select() is None
+        await ws.send_json({"type": "session.event", "id": "ready", "event": {
+            "type": "event:shell_ready", "shellName": "Rook",
+            "spatialContext": {"surface": {"mode": "desktop"}},
+        }})
+        assert (await ws.receive_json())["replyTo"] == "ready"
+        # Hold the cognition lock as a real Telegram turn does. The receipt
+        # must resolve directly in the socket reader, without another model turn.
+        async with entity._turn_lock:
+            pending = asyncio.create_task(registry.execute(ToolCallSpec(
+                name="ar_spawn_toy", arguments={
+                    "object_id": "purple-ball", "toy_type": "bouncy_ball", "color": "#800080",
+                },
+            )))
+            message = await asyncio.wait_for(ws.receive_json(), timeout=1)
+            action = message["actions"][0]
+            assert action["sessionId"] == "desktop-body"
+            assert action["type"] == "action:spawn_toy"
+            assert not pending.done()
+            await ws.send_json({"type": "session.event", "id": "ack", "event": {
+                "type": "event:action_completed", "completedActionId": action["actionId"],
+                "status": "completed",
+            }})
+            assert "spawn_toy completed" in await asyncio.wait_for(pending, timeout=1)
+            assert (await ws.receive_json())["replyTo"] == "ack"
+        await ws.close()
+        for _ in range(50):
+            if entity._ngram_ar_sessions.select() is None:
+                break
+            await asyncio.sleep(0.01)
+        result = await registry.execute(ToolCallSpec(
+            name="ar_spawn_toy", arguments={"object_id": "ball", "toy_type": "ball"},
+        ))
+        assert "no connected Spatial session" in result
+        assert "_ngram_ar_spatial_actions" not in state
+        # A gateway-to-entity reconnect restores an already-open renderer
+        # without needing a new browser connection or replaying old actions.
+        ws = await client.ws_connect("/")
+        await ws.send_json({
+            "type": "session.start", "sessionId": "desktop-body",
+            "surfaceReady": {"type": "event:shell_ready", "shellName": "Rook"},
+        })
+        assert (await ws.receive_json())["type"] == "session.ready"
+        assert entity._ngram_ar_sessions.select().session_id == "desktop-body"
+        assert not entity._ngram_ar_sessions.select().pending
+    finally:
+        reset_tool_runtime(token)
+        await ws.close()
+        await client.close()
 
 
 def test_external_message_activity_drives_texting_state(

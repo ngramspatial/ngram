@@ -153,6 +153,7 @@ test('entity bridge reconnects and starts a fresh authenticated session', async 
   let connectionCount = 0;
   let eventCount = 0;
   let activeSocket;
+  const starts = [];
 
   wss.on('connection', (socket, request) => {
     connectionCount += 1;
@@ -161,6 +162,7 @@ test('entity bridge reconnects and starts a fresh authenticated session', async 
     socket.on('message', (raw) => {
       const message = JSON.parse(raw.toString());
       if (message.type === 'session.start') {
+        starts.push(message);
         socket.send(JSON.stringify({ type: 'session.ready' }));
       } else if (message.type === 'session.event') {
         eventCount += 1;
@@ -189,6 +191,8 @@ test('entity bridge reconnects and starts a fresh authenticated session', async 
     await binding.start('test prompt');
     const first = await binding.handleEvent({ type: 'event:user_speech', text: 'one' });
     assert.equal(first[0].text, 'reply-1');
+    assert.equal(starts[0].surfaceReady, null);
+    await binding.handleEvent({ type: 'event:shell_ready', shellName: 'webxr' });
 
     activeSocket.close();
     await once(activeSocket, 'close');
@@ -197,8 +201,9 @@ test('entity bridge reconnects and starts a fresh authenticated session', async 
     assert.equal(proactive.at(-1)?.state, 'idle');
 
     const second = await binding.handleEvent({ type: 'event:user_speech', text: 'two' });
-    assert.equal(second[0].text, 'reply-2');
+    assert.equal(second[0].text, 'reply-3');
     assert.equal(connectionCount, 2);
+    assert.equal(starts[1].surfaceReady.type, 'event:shell_ready');
   } finally {
     await binding.stop();
     for (const client of wss.clients) client.terminate();

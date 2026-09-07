@@ -1,5 +1,6 @@
 // @ts-nocheck
 import * as THREE from 'three';
+import { captionPages } from './speech-captions.js';
 import { SPATIAL, drawBrand, drawIcon, drawSurface, setSpatialFont, spatialTexture, wrapSpatialText } from './spatial-design.js';
 
 // ─── Theme tokens ────────────────────────────────────────────────────────────
@@ -63,7 +64,7 @@ function createBubbleTexture(text: string): { texture: THREE.CanvasTexture; aspe
   const textMaxW = CANVAS_W - pad * 2 - 16;
 
   setSpatialFont(ctx, `500 ${fontSize}px ${FONT}`);
-  const lines = wrapText(ctx, text, textMaxW);
+  const lines = wrapText(ctx, captionPages(text)[0]?.text ?? '', textMaxW).slice(0, 4);
   const textH = lines.length * lineHeight;
   const cardH = textH + pad * 2;
 
@@ -218,12 +219,14 @@ export class SpatialUI {
 
   // ─── Speech bubble ─────────────────────────────────────────────────────────
 
-  showBubble(text: string, avatarPos: THREE.Vector3, headOffset = 2.0): void {
+  showBubble(text: string, avatarPos: THREE.Vector3, headOffset = 2.0, holdUntilPlaybackEnds = false): void {
     if (!this.scene) return;
     this.hideBubble();
 
     const { texture, aspect } = createBubbleTexture(text);
     this.bubbleMesh = createPlane(texture, BUBBLE_WORLD_W, aspect);
+    // Anchor the bottom above the head, so the card grows away from the body.
+    this.bubbleMesh.position.y = BUBBLE_WORLD_W / aspect / 2;
 
     this.bubbleGroup = new THREE.Group();
     this.bubbleGroup.add(this.bubbleMesh);
@@ -241,7 +244,8 @@ export class SpatialUI {
     requestAnimationFrame(fadeIn);
 
     this.scene.add(this.bubbleGroup);
-    this.hideTimer = setTimeout(() => this.hideBubble(), 10000);
+    // Transient microphone notices expire; spoken captions belong to playback.
+    if (!holdUntilPlaybackEnds) this.hideTimer = setTimeout(() => this.hideBubble(), 10000);
   }
 
   showThinking(avatarPos: THREE.Vector3, headOffset = 2.0): void {

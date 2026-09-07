@@ -13,6 +13,7 @@ export class EntityBridgeBinding {
     shellName;
     shellSlug;
     brainConfig;
+    surfaceReadyEvent = null;
     ws = null;
     started = false;
     stopping = false;
@@ -103,6 +104,7 @@ export class EntityBridgeBinding {
             systemPrompt: this.systemPrompt,
             shellName: this.shellName,
             shellSlug: this.shellSlug,
+            surfaceReady: this.surfaceReadyEvent,
         };
         if (this.arCognitionContextMarkdown) {
             startPayload["arCognitionContextMarkdown"] = this.arCognitionContextMarkdown;
@@ -316,6 +318,9 @@ export class EntityBridgeBinding {
         this.brainPending.clear();
     }
     async handleEvent(event) {
+        if (event.type === "event:shell_ready") {
+            this.surfaceReadyEvent = event;
+        }
         await this.ensureConnected();
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN)
             throw new Error("Entity bridge could not reconnect");

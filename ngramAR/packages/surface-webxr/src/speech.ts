@@ -1,4 +1,14 @@
 // @ts-nocheck
+import { captionPages, captionAt } from './speech-captions.js';
+export interface SpeechPlaybackOptions {
+  text?: string;
+  audioData?: string;
+  audioUrl?: string;
+  speed?: number;
+  voice?: string;
+  onStart?: () => void;
+  onCaption?: (text: string) => void;
+}
 type TranscriptionCallback = (text: string) => void;
 type ListeningStateCallback = (
   state: 'recording' | 'transcribing' | 'idle' | 'error',
@@ -9,7 +19,7 @@ type ListeningMode = 'browser' | 'recorded';
 
 interface QueuedPlay {
   play: (onDone: () => void) => void;
-  onEnd: () => void;
+  onEnd: (cancelled?: boolean) => void;
 }
 
 export class SpeechHandler {
@@ -39,6 +49,8 @@ export class SpeechHandler {
   private playbackEpoch = 0;
   private activeSource: AudioBufferSourceNode | null = null;
   private playbackEnd: (() => void) | null = null;
+  private captionTimer: ReturnType<typeof setInterval> | null = null;
+  private playbackAbort: AbortController | null = null;
 
   isListening = false;
 
@@ -307,6 +319,8 @@ export class SpeechHandler {
   // --- TTS playback (queued to prevent overlaps) ---
 
   stopPlayback(): void {
+    this.clearCaptionTimer();
+    this.playbackAbort?.abort();
     this.playbackEpoch++;
     this.playQueue = [];
     if (this.activeSource) {
@@ -319,15 +333,59 @@ export class SpeechHandler {
     this.setMicMuted(false);
     const onEnd = this.playbackEnd;
     this.playbackEnd = null;
-    onEnd?.();
+    onEnd?.(true);
   }
 
   playAudio(audioBase64: string, onEnd: () => void): void {
-    this.enqueue((done) => this.playAudioImmediate(audioBase64, done), onEnd);
+    this.playResponse({ audioData: audioBase64 }, onEnd);
   }
 
   playSpeechFallback(text: string, onEnd: () => void): void {
-    this.enqueue((done) => this.playSpeechFallbackImmediate(text, done), onEnd);
+    this.playResponse({ text }, onEnd);
+  }
+
+  playResponse(options: SpeechPlaybackOptions, onEnd: (cancelled?: boolean) => void): void {
+    this.enqueue((done) => {
+      const epoch = this.playbackEpoch;
+      const fallback = () => {
+        if (epoch !== this.playbackEpoch) return;
+        if (options.text) this.playSpeechFallbackImmediate(options.text, done, options);
+        else done();
+      };
+      const play = (base64: string) => this.playAudioImmediate(base64, done, options, fallback);
+      if (options.audioData) play(options.audioData);
+      else if (options.audioUrl) {
+        this.playbackAbort = new AbortController();
+        fetch(options.audioUrl, { signal: this.playbackAbort.signal })
+          .then(response => { if (!response.ok) throw new Error('Audio download failed'); return response.arrayBuffer(); })
+          .then(buffer => {
+            if (epoch !== this.playbackEpoch) return;
+            const bytes = new Uint8Array(buffer);
+            let binary = '';
+            for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+            play(btoa(binary));
+          }).catch(fallback);
+      } else fallback();
+    }, onEnd);
+  }
+
+  private clearCaptionTimer(): void {
+    if (this.captionTimer) clearInterval(this.captionTimer);
+    this.captionTimer = null;
+  }
+
+  private startCaptions(options: SpeechPlaybackOptions, position: () => number): (index: number) => void {
+    this.clearCaptionTimer();
+    const pages = captionPages(options.text ?? '');
+    let last = '';
+    const update = (index: number) => {
+      const text = captionAt(pages, index);
+      if (text && text !== last) { last = text; options.onCaption?.(text); }
+    };
+    options.onStart?.();
+    update(0);
+    this.captionTimer = setInterval(() => update(position()), 100);
+    return update;
   }
 
   private enqueue(play: (onDone: () => void) => void, onEnd: () => void): void {
@@ -346,8 +404,11 @@ export class SpeechHandler {
     const item = this.playQueue.shift()!;
     const epoch = this.playbackEpoch;
     this.playbackEnd = item.onEnd;
+    let finished = false;
     item.play(() => {
-      if (epoch !== this.playbackEpoch) return;
+      if (finished || epoch !== this.playbackEpoch) return;
+      finished = true;
+      this.clearCaptionTimer();
       this.playbackEnd = null;
       this.activeSource = null;
       item.onEnd();
@@ -363,7 +424,8 @@ export class SpeechHandler {
     }
   }
 
-  private playAudioImmediate(audioBase64: string, onDone: () => void): void {
+  private playAudioImmediate(audioBase64: string, onDone: () => void, options: SpeechPlaybackOptions = {}, onError = onDone): void {
+    try {
     const ctx = this.ensureAudioContext();
     const epoch = this.playbackEpoch;
 
@@ -387,24 +449,45 @@ export class SpeechHandler {
 
         source.onended = onDone;
         source.start(0);
+        const startedAt = ctx.currentTime;
+        this.startCaptions(options, () => (options.text?.length ?? 0) * (ctx.currentTime - startedAt) / Math.max(buffer.duration, 0.01));
       },
       (err) => {
-        console.warn('[speech] audio decode failed, using fallback', err);
-        onDone();
+        if (epoch !== this.playbackEpoch) return;
+        console.warn('[speech] audio decode failed, using browser speech');
+        onError();
       },
     );
+    } catch { onError(); }
   }
 
-  private playSpeechFallbackImmediate(text: string, onDone: () => void): void {
+  private playSpeechFallbackImmediate(text: string, onDone: () => void, options: SpeechPlaybackOptions = {}): void {
     if (!window.speechSynthesis) {
       onDone();
       return;
     }
     const utterance = new SpeechSynthesisUtterance(text);
-    utterance.rate = 1.0;
+    utterance.rate = options.speed ?? 1.0;
+    const selectedVoice = window.speechSynthesis.getVoices?.().find(voice => voice.voiceURI === options.voice || voice.name === options.voice);
+    if (selectedVoice) utterance.voice = selectedVoice;
     utterance.pitch = 1.0;
-    utterance.onend = onDone;
-    utterance.onerror = () => onDone();
+    let finished = false;
+    const finish = () => { if (finished) return; finished = true; onDone(); };
+    utterance.onend = finish;
+    utterance.onerror = finish;
+    const epoch = this.playbackEpoch;
+    let update: ((index: number) => void) | undefined;
+    let boundary: number | undefined;
+    utterance.onstart = () => {
+      if (finished || epoch !== this.playbackEpoch) return;
+      const start = performance.now();
+      update = this.startCaptions({ ...options, text }, () => boundary ?? (performance.now() - start) / 1000 * 15 * utterance.rate);
+    };
+    utterance.onboundary = event => {
+      if (finished || epoch !== this.playbackEpoch) return;
+      boundary = event.charIndex;
+      update?.(boundary);
+    };
     window.speechSynthesis.speak(utterance);
   }
 

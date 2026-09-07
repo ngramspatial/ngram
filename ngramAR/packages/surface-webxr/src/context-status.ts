@@ -33,5 +33,5 @@ export function updateContextDisplay(state: ContextDisplayState, event: {
   const text = next.compacting ? 'Compacting context…'
     : (next.noticeUntil ?? 0) > now ? next.notice! : usage;
   const last = next.lastCompactedAt ? ` Last compacted ${new Date(next.lastCompactedAt).toLocaleTimeString()}.` : '';
-  return { state: next, text, title: `${usage}. Estimated prompt size, not billing usage.${last} Click to compact older turns now, or type /compact.` };
+  return { state: next, text, title: `${usage}. Estimated prompt size, not billing usage.${last} Type /compact to summarize older turns.` };
 }

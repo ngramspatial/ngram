@@ -1,6 +1,7 @@
 // @ts-nocheck
 import * as THREE from 'three';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+import { captionPages } from './speech-captions.js';
 
 export class SpeechBubbleManager {
   private renderer: CSS2DRenderer;
@@ -48,22 +49,27 @@ export class SpeechBubbleManager {
   }
 
   show(text: string, scene: THREE.Scene, position: THREE.Vector3): void {
-    this.hide(scene);
+    if (this.hideTimer) { clearTimeout(this.hideTimer); this.hideTimer = null; }
+    const caption = captionPages(text)[0]?.text ?? '';
+    if (this.currentEl) {
+      this.currentEl.textContent = caption;
+      return;
+    }
 
     const el = document.createElement('div');
     el.className = 'speech-bubble';
-    el.textContent = text;
+    el.textContent = caption;
     this.currentEl = el;
 
     const obj = new CSS2DObject(el);
+    obj.center.set(0.5, 1);
     obj.position.copy(position);
-    obj.position.y += 0.3;
     scene.add(obj);
     this.currentBubble = obj;
 
     requestAnimationFrame(() => el.classList.add('visible'));
 
-    this.hideTimer = setTimeout(() => this.hide(scene), 8000);
+    // Playback owns lifetime; a long utterance must not lose its caption.
   }
 
   showAtAvatar(text: string, scene: THREE.Scene, avatarPos: THREE.Vector3, headOffset = 2.0): void {
@@ -75,6 +81,7 @@ export class SpeechBubbleManager {
 
   showThinking(scene: THREE.Scene, avatarPos: THREE.Vector3, headOffset = 2.0): void {
     this.showAtAvatar('...', scene, avatarPos, headOffset);
+    this.hideTimer = setTimeout(() => this.hide(scene), 15000);
   }
 
   hide(scene: THREE.Scene): void {

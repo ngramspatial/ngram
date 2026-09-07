@@ -77,11 +77,11 @@ class OpenAIVoiceEngine {
     voice;
     speed;
     constructor(profile) {
-        const key = profile.apiKey ??
-            process.env["NGRAM_AR_OPENAI_API_KEY"]?.trim() ??
-            process.env["OPENAI_API_KEY"]?.trim() ??
-            process.env["NGRAM_AR_TTS_API_KEY"]?.trim() ??
-            process.env["NGRAM_AR_LLM_API_KEY"]?.trim() ??
+        const key = profile.apiKey?.trim() ||
+            process.env["NGRAM_AR_OPENAI_API_KEY"]?.trim() ||
+            process.env["OPENAI_API_KEY"]?.trim() ||
+            process.env["NGRAM_AR_TTS_API_KEY"]?.trim() ||
+            process.env["NGRAM_AR_LLM_API_KEY"]?.trim() ||
             "";
         if (!key) {
             throw new Error("OpenAI TTS requires an API key via VoiceProfile.apiKey, NGRAM_AR_OPENAI_API_KEY, or OPENAI_API_KEY");
@@ -122,17 +122,17 @@ class CartesiaVoiceEngine {
     speed;
     emotion;
     constructor(profile) {
-        const key = profile.apiKey ??
-            process.env["CARTESIA_API_KEY"]?.trim() ??
-            process.env["NGRAM_AR_TTS_API_KEY"]?.trim() ??
+        const key = profile.apiKey?.trim() ||
+            process.env["CARTESIA_API_KEY"]?.trim() ||
+            process.env["NGRAM_AR_TTS_API_KEY"]?.trim() ||
             "";
         if (!key) {
             throw new Error("Cartesia TTS requires an API key via VoiceProfile.apiKey, " +
                 "CARTESIA_API_KEY, or NGRAM_AR_TTS_API_KEY");
         }
         this.apiKey = key;
-        this.voiceId = profile.voice || "a0e99841-438c-4a64-b679-ae501e7d6091";
-        this.modelId = profile.model || "sonic-3";
+        this.voiceId = profile.voice || "db6b0ed5-d5d3-463d-ae85-518a07d3c2b4";
+        this.modelId = profile.model || "sonic-3.6";
         this.speed = profile.speed ?? 1.0;
         this.emotion = profile.emotion;
     }
@@ -140,12 +140,12 @@ class CartesiaVoiceEngine {
         const body = {
             model_id: this.modelId,
             transcript: text,
-            voice: { mode: "id", id: this.voiceId },
+            voice: this.voiceId,
             language: "en",
             output_format: {
-                container: "mp3",
+                container: "wav",
+                encoding: "pcm_s16le",
                 sample_rate: 44100,
-                bit_rate: 128000,
             },
         };
         if (this.speed !== 1.0 || this.emotion) {
@@ -159,15 +159,15 @@ class CartesiaVoiceEngine {
         const response = await fetch("https://api.cartesia.ai/tts/bytes", {
             method: "POST",
             headers: {
-                "X-API-Key": this.apiKey,
-                "Cartesia-Version": "2025-04-16",
+                Authorization: `Bearer ${this.apiKey}`,
+                "Cartesia-Version": "2026-08-14",
                 "Content-Type": "application/json",
             },
             body: JSON.stringify(body),
+            signal: AbortSignal.timeout(30000),
         });
         if (!response.ok) {
-            const errBody = await response.text().catch(() => "");
-            throw new Error(`Cartesia TTS failed (${response.status}): ${errBody}`);
+            throw new Error(`Cartesia TTS failed (${response.status}). Check the key, voice ID, and model.`);
         }
         const buffer = await response.arrayBuffer();
         const audioBase64 = btoa(Array.from(new Uint8Array(buffer), (b) => String.fromCharCode(b)).join(""));
@@ -178,8 +178,9 @@ class CartesiaVoiceEngine {
 // The actual speech synthesis happens on the shell surface (browser/WebXR).
 // This engine returns an empty payload so the surface knows to use its own TTS.
 class BrowserVoiceEngine {
+    constructor(profile) { this.profile = profile; }
     async synthesize(_text) {
-        return { audioBase64: "" };
+        return { audioBase64: "", voiceConfig: { voice: this.profile.voice, speed: this.profile.speed ?? 1 } };
     }
 }
 // ─── Factory ────────────────────────────────────────────────────────────────
@@ -192,7 +193,7 @@ export function createVoiceEngine(profile) {
         case "cartesia":
             return new CartesiaVoiceEngine(profile);
         case "browser":
-            return new BrowserVoiceEngine();
+            return new BrowserVoiceEngine(profile);
         default:
             throw new Error(`Unsupported voice provider: ${profile.provider}`);
     }

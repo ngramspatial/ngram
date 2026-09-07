@@ -3,8 +3,12 @@ import * as THREE from 'three';
 import { loadSpatialAssets } from './spatial-design.js';
 import { createScene } from './scene-setup.js';
 import { ConnectionManager } from './connection.js';
+import { dispatchWithReceipt } from './action-receipts.js';
 import { AvatarController } from './avatar.js';
 import { SpeechHandler } from './speech.js';
+import { attachSlashCommands, parseSlashCommand, SLASH_COMMANDS, showCommandNotice } from './slash-commands.js';
+import { captionPages } from './speech-captions.js';
+import { setupVoiceSettings } from './voice-settings.js';
 import { mergeVoiceDraft } from './voice-draft.js';
 import { updateContextDisplay } from './context-status.js';
 import type { ContextDisplayState } from './context-status.js';
@@ -77,19 +81,18 @@ async function main() {
   } = createScene();
   const ui = setupUI();
   let contextDisplay: ContextDisplayState = {};
-  const contextStatusEl = document.getElementById('context-status');
   function handleContextStatus(status: any): void {
     const display = updateContextDisplay(contextDisplay, status);
     contextDisplay = display.state;
-    if (contextStatusEl) {
-      contextStatusEl.textContent = display.text;
-      contextStatusEl.title = display.title;
-      contextStatusEl.dataset.compacting = String(!!contextDisplay.compacting);
-    }
+    if (status.phase !== 'usage') notifyCommand(display.text);
   }
   const connection = new ConnectionManager(false);
   const avatar = new AvatarController();
   const speech = new SpeechHandler();
+  setupVoiceSettings({
+    play: (options, done) => { clearResponsePlayback(); speech.playResponse(options, done); },
+    stop: () => clearResponsePlayback(),
+  });
   const xr = new XRManager();
   const bubbles = new SpeechBubbleManager();
   const panels = new PanelManager();
@@ -636,16 +639,10 @@ async function main() {
   });
 
   // Inference status is model-free and belongs to the shared Entity.
-  const inferenceButton = document.getElementById('inference-control') as HTMLButtonElement | null;
-  let inferencePaused = false;
   let inferencePoll: ReturnType<typeof setInterval> | undefined;
   function queryInferenceStatus(): void {
     connection.send({ type: 'event:inference_control', command: 'status' });
   }
-  inferenceButton?.addEventListener('click', () => {
-    inferenceButton.disabled = true;
-    connection.send({ type: 'event:inference_control', command: inferencePaused ? 'resume' : 'pause' });
-  });
 
   // --- Connection status ---
   connection.onStatusChange((status) => {
@@ -665,7 +662,6 @@ async function main() {
         break;
       default:
         clearInterval(inferencePoll);
-        if (inferenceButton) inferenceButton.disabled = true;
         ui.setStatus('disconnected', false);
         ui.setShellInfo(shellName, 'disconnected', false);
         ui.addNotification(`Disconnected from ${shellName}`);
@@ -741,7 +737,7 @@ async function main() {
   };
 
   // --- Action dispatch ---
-  connection.onMessage((msg: SpatialAction) => {
+  function dispatchSpatialAction(msg: SpatialAction): void {
     const { type } = msg;
     switch (type) {
       case 'shell:config':
@@ -869,16 +865,7 @@ async function main() {
           ? 'Turn stopped at the time limit.' : 'Stopped.', 2500);
         break;
       case 'action:inference_status':
-        inferencePaused = msg.paused;
-        if (inferenceButton) {
-          inferenceButton.disabled = false;
-          inferenceButton.textContent = inferencePaused ? 'Inference paused · Resume' : 'Pause inference';
-          inferenceButton.setAttribute('aria-pressed', String(inferencePaused));
-          inferenceButton.title = inferencePaused
-            ? 'Resume chat and background inference for this Entity'
-            : 'Pause chat, embeddings, and background inference. Other surfaces share this control.';
-        }
-        if (inferencePaused) clearResponsePlayback();
+        if (msg.paused) clearResponsePlayback();
         break;
       case 'action:context_status':
         handleContextStatus(msg);
@@ -1061,7 +1048,7 @@ async function main() {
             error: 'Vision is disabled by user',
             spatialContext: buildSpatialContext(),
           });
-          break;
+          throw new Error('Vision is disabled by user');
         }
         const image = captureFrame(renderer);
         spatialUI.showCaptureFlash(camera);
@@ -1094,10 +1081,16 @@ async function main() {
         }
         break;
       }
+      default:
+        if (msg.actionId) throw new Error(`Unsupported spatial action: ${type}`);
     }
 
     // Also dispatch through the router for any additional listeners
     router.dispatch(msg);
+  }
+
+  connection.onMessage((msg: SpatialAction) => {
+    dispatchWithReceipt(msg, () => dispatchSpatialAction(msg), (event) => connection.send(event));
   });
 
   // ─── Agent State Handling ──────────────────────────────────────────────────
@@ -1256,16 +1249,7 @@ async function main() {
     const delta = (msg as any).delta as string ?? '';
     streamedText += delta;
 
-    if (agentSpawned && agentVisible) {
-      if (xr.isARActive) {
-        spatialUI.showBubble(streamedText, avatar.getPosition());
-      } else {
-        bubbles.showAtAvatar(streamedText, scene, avatar.getPosition());
-      }
-    }
-    if (!xr.isARActive) {
-      ui.showSubtitle(shellName, streamedText);
-    }
+    if (!pendingSpeakCount) showSpeechCaption(captionPages(streamedText).at(-1)?.text ?? '');
   }
 
   function handleSpeakStreamEnd(msg: SpatialAction) {
@@ -1274,22 +1258,7 @@ async function main() {
     activeStreamId = null;
     streamedText = '';
 
-    ui.addTranscript('agent', fullText);
-
-    const onEnd = () => {
-      avatar.setSpeaking(false);
-      if (!shouldPreserveCurrentAnimation()) {
-        avatar.setAnimation('idle');
-      }
-      if (xr.isARActive) { spatialUI.hideBubble(); }
-      else { bubbles.hide(scene); }
-    };
-
-    if ((msg as any).audioData) {
-      speech.playAudio((msg as any).audioData, onEnd);
-    } else {
-      onEnd();
-    }
+    handleSpeak({ ...msg, text: fullText });
   }
 
   // --- Spawn handling ---
@@ -1731,31 +1700,28 @@ async function main() {
   // --- Speech ---
   let pendingSpeakCount = 0;
 
+  function showSpeechCaption(text: string): void {
+    if (!xr.isARActive) ui.showSubtitle(shellName, text, 0);
+    if (!agentSpawned || !agentVisible) return;
+    const head = avatar.getVoicePosition();
+    const clearance = Math.max(0.04, avatar.getVisualHeight() * 0.15);
+    if (xr.isARActive) spatialUI.showBubble(text, head, clearance, true);
+    else bubbles.showAtAvatar(text, scene, head, clearance);
+  }
+
   function handleSpeak(msg: any) {
     pendingSpeakCount++;
-    avatar.setSpeaking(true);
-    avatar.setAnimation(pickSpeakAnim());
     ambient.recordInteraction();
 
     if (msg.text) {
       ui.addTranscript('agent', msg.text);
-      if (!xr.isARActive) {
-        ui.showSubtitle(shellName, msg.text);
-      }
-      if (agentSpawned && agentVisible) {
-        if (xr.isARActive) {
-          spatialUI.showBubble(msg.text, avatar.getPosition());
-        } else {
-          bubbles.showAtAvatar(msg.text, scene, avatar.getPosition());
-        }
-      }
     }
 
     const actionTimestamp = msg.timestamp ?? Date.now();
 
-    const onEnd = () => {
+    const onEnd = (cancelled = false) => {
       pendingSpeakCount--;
-      connection.send({
+      if (!cancelled) connection.send({
         type: 'event:action_completed',
         action: 'speak',
         actionTimestamp,
@@ -1768,6 +1734,7 @@ async function main() {
           avatar.setAnimation('idle');
         }
         lastSpeechEndTime = Date.now();
+        ui.hideSubtitle();
         if (xr.isARActive) {
           spatialUI.hideBubble();
         } else {
@@ -1776,24 +1743,12 @@ async function main() {
       }
     };
 
-    if (msg.audioData) {
-      speech.playAudio(msg.audioData, onEnd);
-    } else if (msg.audioUrl) {
-      fetch(msg.audioUrl)
-        .then((r) => r.arrayBuffer())
-        .then((buf) => {
-          const b64 = arrayBufferToBase64(buf);
-          speech.playAudio(b64, onEnd);
-        })
-        .catch(() => {
-          if (msg.text) speech.playSpeechFallback(msg.text, onEnd);
-          else onEnd();
-        });
-    } else if (msg.text) {
-      speech.playSpeechFallback(msg.text, onEnd);
-    } else {
-      onEnd();
-    }
+    speech.playResponse({
+      text: msg.text, audioData: msg.audioData, audioUrl: msg.audioUrl,
+      speed: msg.voiceConfig?.speed, voice: msg.voiceConfig?.voice,
+      onStart: () => { avatar.setSpeaking(true); avatar.setAnimation(pickSpeakAnim()); },
+      onCaption: showSpeechCaption,
+    }, onEnd);
   }
 
   function setMicAppearance(active: boolean): void {
@@ -1901,9 +1856,36 @@ async function main() {
   });
 
   // --- Desktop UI event listeners ---
+  function notifyCommand(text: string): void { ui.addNotification(text); showCommandNotice(text); }
   function sendTextMessage() {
     const text = ui.textInput.value.trim();
     if (!text) return;
+    const command = parseSlashCommand(text);
+    if (command) {
+      if (!command.valid) { notifyCommand('Unknown command. Type /help to see commands.'); return; }
+      if (['compact', 'pause', 'resume'].includes(command.name) && !connection.isConnected()) {
+        notifyCommand('Connect an agent before using this command.'); return;
+      }
+      if (command.name === 'stop') { stopResponse(); notifyCommand('Response stopped.'); }
+      if (command.name === 'pause') {
+        clearResponsePlayback();
+        connection.send({ type: 'event:inference_control', command: 'pause' });
+      }
+      if (command.name === 'resume') connection.send({ type: 'event:inference_control', command: 'resume' });
+      if (command.name === 'compact') {
+        if (!contextDisplay.compacting) connection.send({ type: 'event:compact_context' });
+        notifyCommand(contextDisplay.compacting ? 'Context compaction is already running.' : 'Compaction requested.');
+      }
+      if (command.name === 'context') notifyCommand(updateContextDisplay(contextDisplay, { phase: 'usage' }).title);
+      if (command.name === 'help') notifyCommand(SLASH_COMMANDS.map(item => `/${item.name} — ${item.description}`).join('\n'));
+      if (command.name === 'voice') {
+        document.getElementById('settings-btn')?.click();
+        document.getElementById('settings-tab-voice')?.click();
+      }
+      ui.textInput.value = '';
+      ui.textInput.dispatchEvent(new Event('input'));
+      return;
+    }
     ui.addTranscript('user', text);
     ui.showSubtitle('You', text, 2500);
     ambient.recordInteraction();
@@ -1915,9 +1897,11 @@ async function main() {
     });
     ui.textInput.value = '';
     ui.textInput.style.height = 'auto';
+    ui.textInput.dispatchEvent(new Event('input'));
   }
 
   ui.sendBtn.addEventListener('click', sendTextMessage);
+  attachSlashCommands(ui.textInput, sendTextMessage);
   function clearResponsePlayback(): void {
     speech.stopPlayback();
     pendingSpeakCount = 0;
@@ -1928,15 +1912,13 @@ async function main() {
     if (xr.isARActive) spatialUI.hideBubble();
     else bubbles.hide(scene);
     ui.hideBusy();
+    ui.hideSubtitle();
   }
   function stopResponse(): void {
     clearResponsePlayback();
     connection.send({ type: 'event:cancel_turn' });
   }
   document.getElementById('stop-turn-btn')?.addEventListener('click', stopResponse);
-  contextStatusEl?.addEventListener('click', () => {
-    if (!contextDisplay.compacting) connection.send({ type: 'event:compact_context' });
-  });
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape' && (contextDisplay.compacting || isThinkingAgentState(currentAgentState) || currentAgentState === 'messaging' || avatar.isSpeaking())) {
       event.preventDefault();
@@ -1944,7 +1926,7 @@ async function main() {
     }
   });
   ui.textInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (!e.defaultPrevented && !e.isComposing && e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       sendTextMessage();
     }
@@ -2676,9 +2658,9 @@ async function main() {
       overlayBridge.setAvatarScale(sc);
       overlayBridge.setAnchorVisualHeight(vh);
       if (xr.isARActive) {
-        spatialUI.updateBubblePosition(agentPos, 2.0 * sc);
+        spatialUI.updateBubblePosition(voicePos, Math.max(0.04, vh * 0.15));
       } else {
-        bubbles.updatePosition(agentPos);
+        bubbles.updatePosition(voicePos, Math.max(0.04, vh * 0.15));
       }
 
       const dist = camera.position.distanceTo(agentPos);

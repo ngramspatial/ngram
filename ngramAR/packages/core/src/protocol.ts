@@ -12,6 +12,8 @@ export interface SpeakAction extends ProtocolMessage {
     text: string;
     /** Pre-synthesized audio (base64). If absent, shell uses its voice profile. */
     audioData?: string;
+    /** Browser speech choices supplied by the gateway; never includes credentials. */
+    voiceConfig?: { voice?: string; speed?: number };
     visemes?: [number, number, number][];
 }
 export interface EmoteAction extends ProtocolMessage {
@@ -400,6 +402,9 @@ export interface ActionCompletedEvent extends ProtocolMessage {
     action: string;
     /** The actionId of the completed action, for correlation. */
     completedActionId?: string;
+    /** Accepted means execution was started, not that an async action finished. */
+    status?: "accepted" | "completed" | "failed";
+    error?: string;
     actionTimestamp: number;
 }
 export interface ShellReadyEvent extends ProtocolMessage {

@@ -1,6 +1,7 @@
 // @ts-nocheck
 import { marked } from 'marked';
 import { isThemeName, nextTheme, normalizeTheme, themeUsesDarkPanels } from './theme.js';
+import { providerLogo } from './provider-logos.js';
 
 marked.setOptions({ breaks: true, gfm: true });
 
@@ -74,7 +75,7 @@ const MAX_TRANSCRIPT_MESSAGES = 80;
 const SUBTITLE_HOLD_MS = 4000;
 
 const PLACEHOLDER_HINTS = [
-  'Say something...',
+  'Message or /command',
   'Ask your agent a question',
   'Try "Tell me about yourself"',
   'Give a command like "walk over there"',
@@ -762,7 +763,7 @@ export function setupUI(): UIHandle {
     if (subtitleSpeakerEl) subtitleSpeakerEl.textContent = speaker + ':';
     if (subtitleTextEl) subtitleTextEl.textContent = text;
     if (subtitleEl) subtitleEl.classList.add('visible');
-    subtitleHideTimer = setTimeout(() => hideSubtitle(), duration ?? SUBTITLE_HOLD_MS);
+    if (duration !== 0) subtitleHideTimer = setTimeout(() => hideSubtitle(), duration ?? SUBTITLE_HOLD_MS);
   }
 
   function hideSubtitle(): void {
@@ -1483,11 +1484,17 @@ export function setupUI(): UIHandle {
       button.type = 'button';
       button.className = `brain-provider${provider.id === selected ? ' active' : ''}`;
       button.dataset.provider = provider.id;
-      button.style.setProperty('--provider-accent', provider.accent || 'var(--accent)');
       button.setAttribute('aria-pressed', provider.id === selected ? 'true' : 'false');
       const mark = document.createElement('span');
       mark.className = 'brain-provider-mark';
-      mark.textContent = provider.mark;
+      const logo = document.createElement('img');
+      logo.src = providerLogo(provider.id);
+      logo.alt = '';
+      logo.width = 24;
+      logo.height = 24;
+      logo.decoding = 'async';
+      logo.addEventListener('error', () => { logo.src = providerLogo('custom'); }, { once: true });
+      mark.append(logo);
       const name = document.createElement('span');
       name.className = 'brain-provider-name';
       name.textContent = provider.name;
@@ -1495,7 +1502,7 @@ export function setupUI(): UIHandle {
       button.addEventListener('click', () => selectBrainProvider(provider.id));
       brainProviderGrid.append(button);
     }
-    if (brainProviderCount) brainProviderCount.textContent = `${brainProviders.length} options`;
+    if (brainProviderCount) brainProviderCount.textContent = `${brainProviders.filter(p => p.id !== 'custom').length} integrations + custom`;
   }
 
   function selectBrainProvider(providerId: string): void {
@@ -1504,11 +1511,13 @@ export function setupUI(): UIHandle {
     const changed = brainDrafts.frontier.provider !== providerId;
     brainDrafts.frontier.provider = providerId;
     if (changed) {
-      brainDrafts.frontier.model = provider.defaultModel ?? '';
-      brainDrafts.frontier.baseUrl = '';
-      brainDrafts.frontier.embeddingMode = 'provider';
-      brainDrafts.frontier.embeddingModel = provider.defaultEmbeddingModel ?? '';
+      const saved = brainConfig?.savedFrontierProfiles?.[providerId];
+      brainDrafts.frontier.model = saved?.model ?? provider.defaultModel ?? '';
+      brainDrafts.frontier.baseUrl = saved?.baseUrl ?? '';
+      brainDrafts.frontier.embeddingMode = saved?.embeddingMode ?? 'provider';
+      brainDrafts.frontier.embeddingModel = saved?.embeddingModel ?? provider.defaultEmbeddingModel ?? '';
       if (brainApiKey) brainApiKey.value = '';
+      setBrainFeedback('');
     }
     renderBrainProviders();
     if (brainMode === 'frontier') applyBrainModeToForm();
@@ -1520,6 +1529,7 @@ export function setupUI(): UIHandle {
       const active = button.dataset.brainMode === brainMode;
       button.classList.toggle('active', active);
       button.setAttribute('aria-selected', active ? 'true' : 'false');
+      button.tabIndex = active ? 0 : -1;
     });
     brainProviderPicker?.classList.toggle('brain-hidden', !frontier);
     brainKeyField?.classList.toggle('brain-hidden', !frontier);
@@ -1540,10 +1550,13 @@ export function setupUI(): UIHandle {
     const provider = brainProviders.find((item) => item.id === brainDrafts.frontier.provider);
     if (frontier) {
       const name = provider?.name ?? 'provider';
-      if (brainFrontierCopy) brainFrontierCopy.textContent = `Connect ${name} without changing this Entity's identity, memory, tools, or body.`;
+      const providerTitle = document.getElementById('brain-provider-title');
+      if (providerTitle) providerTitle.textContent = name;
+      if (brainFrontierCopy) brainFrontierCopy.textContent = 'Configure the model for your entity.';
       if (brainApiKey) {
-        const reusable = Boolean(brainConfig?.hasApiKey && brainConfig.mode === 'frontier' && brainConfig.provider === provider?.id);
-        brainApiKey.placeholder = reusable ? 'Saved on this device — paste to replace' : `Paste ${name} key`;
+        const reusable = Boolean(brainConfig?.savedFrontierProfiles?.[provider?.id ?? '']?.hasApiKey
+          || (brainConfig?.hasApiKey && brainConfig.mode === 'frontier' && brainConfig.provider === provider?.id));
+        brainApiKey.placeholder = reusable ? 'Keep saved key' : 'Paste API key';
       }
       if (brainBaseUrl) brainBaseUrl.placeholder = provider?.id === 'custom' ? 'https://provider.example/v1' : 'Managed automatically';
       if (brainSave) brainSave.textContent = `Connect ${name}`;
@@ -1563,17 +1576,6 @@ export function setupUI(): UIHandle {
     if (brainApiKey) brainApiKey.value = '';
     setBrainFeedback('');
     applyBrainModeToForm();
-    const savedFrontier = mode === 'frontier'
-      ? brainConfig?.savedFrontierProfiles?.[brainDrafts.frontier.provider]
-      : null;
-    const canQuickSwitch = mode !== 'frontier' || Boolean(
-      savedFrontier?.hasApiKey
-      && brainDrafts.frontier.model
-      && (brainDrafts.frontier.embeddingMode === 'existing' || brainDrafts.frontier.embeddingModel),
-    );
-    if (brainConfig?.configured && brainConfig.mode !== mode && canQuickSwitch) {
-      await saveBrainSettings(true);
-    }
   }
 
   async function loadBrainSettings(force = false): Promise<void> {
@@ -1659,6 +1661,14 @@ export function setupUI(): UIHandle {
   brainModeButtons.forEach((button) => button.addEventListener('click', () => {
     void changeBrainMode(button.dataset.brainMode as BrainMode);
   }));
+  brainModeButtons.forEach((button, index) => button.addEventListener('keydown', (event) => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    const next = event.key === 'Home' ? 0 : event.key === 'End' ? brainModeButtons.length - 1
+      : (index + (event.key === 'ArrowRight' ? 1 : -1) + brainModeButtons.length) % brainModeButtons.length;
+    brainModeButtons[next].focus();
+    brainModeButtons[next].click();
+  }));
   brainSave?.addEventListener('click', () => { void saveBrainSettings(); });
   brainEmbeddingMode?.addEventListener('change', () => {
     brainDrafts[brainMode].embeddingMode = (brainEmbeddingMode.value as BrainEmbeddingMode) || 'provider';
@@ -1669,6 +1679,7 @@ export function setupUI(): UIHandle {
     const reveal = brainApiKey.type === 'password';
     brainApiKey.type = reveal ? 'text' : 'password';
     brainKeyToggle.textContent = reveal ? 'Hide' : 'Show';
+    brainKeyToggle.setAttribute('aria-label', reveal ? 'Hide API key' : 'Show API key');
   });
 
   const settingsEnvCallbacks: Array<(preset: string) => void> = [];
@@ -1677,15 +1688,75 @@ export function setupUI(): UIHandle {
   const settingsClearEnvCallbacks: Array<() => void> = [];
   const settingsClearAllCallbacks: Array<() => void> = [];
 
+  const settingsTabs = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-settings-tab]'));
+  const settingsThemeButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-settings-theme]'));
+  let settingsReturnFocus: HTMLElement | null = null;
+  let settingsInertSiblings: HTMLElement[] = [];
+
+  function showSettingsTab(name: string): void {
+    settingsTabs.forEach((tab) => {
+      const active = tab.dataset.settingsTab === name;
+      tab.setAttribute('aria-selected', String(active));
+      tab.tabIndex = active ? 0 : -1;
+      const panel = document.getElementById(tab.getAttribute('aria-controls') ?? '');
+      if (panel) panel.hidden = !active;
+    });
+    const content = settingsModal.querySelector('.settings-content');
+    if (content) content.scrollTop = 0;
+  }
+
+  settingsTabs.forEach((tab, index) => {
+    tab.addEventListener('click', () => showSettingsTab(tab.dataset.settingsTab!));
+    tab.addEventListener('keydown', (event) => {
+      if (!['ArrowDown', 'ArrowUp', 'ArrowRight', 'ArrowLeft', 'Home', 'End'].includes(event.key)) return;
+      event.preventDefault();
+      const next = event.key === 'Home' ? 0 : event.key === 'End' ? settingsTabs.length - 1
+        : (index + (['ArrowDown', 'ArrowRight'].includes(event.key) ? 1 : -1) + settingsTabs.length) % settingsTabs.length;
+      settingsTabs[next].click();
+      settingsTabs[next].focus();
+    });
+  });
+
+  function syncSettingsTheme(): void {
+    const theme = document.documentElement.getAttribute('data-theme') ?? 'light';
+    if (settingsThemeSelect) settingsThemeSelect.value = theme;
+    settingsThemeButtons.forEach(button => button.setAttribute('aria-pressed', String(button.dataset.settingsTheme === theme)));
+    const caption = document.getElementById('settings-theme-caption');
+    if (caption) caption.textContent = theme === 'periwinkle' ? 'Periwinkle controls. A contrasting graphite scene.'
+      : theme === 'dark' ? 'Muted surfaces for a darker workspace.' : 'A clean, light workspace.';
+  }
+
+  settingsThemeButtons.forEach(button => button.addEventListener('click', () => {
+    const theme = button.dataset.settingsTheme;
+    if (isThemeName(theme)) applyTheme(theme as UITheme);
+    syncSettingsTheme();
+  }));
+
   function openSettingsModal(): void {
+    settingsReturnFocus = document.activeElement as HTMLElement;
     const currentTheme = document.documentElement.getAttribute('data-theme') ?? 'light';
     if (settingsThemeSelect) settingsThemeSelect.value = currentTheme;
+    syncSettingsTheme();
     void loadBrainSettings(true);
+    document.dispatchEvent(new Event('settings:opened'));
+    settingsModal.hidden = false;
     settingsModal?.classList.add('open');
+    settingsInertSiblings = Array.from(document.body.children).filter(
+      (node): node is HTMLElement => node instanceof HTMLElement && node !== settingsModal && !node.inert,
+    );
+    settingsInertSiblings.forEach(node => { node.inert = true; });
+    settingsTabs.find(tab => tab.getAttribute('aria-selected') === 'true')?.focus();
   }
 
   function closeSettingsModal(): void {
+    document.dispatchEvent(new Event('settings:closed'));
     settingsModal?.classList.remove('open');
+    settingsModal.hidden = true;
+    settingsInertSiblings.forEach(node => { node.inert = false; });
+    settingsInertSiblings = [];
+    if (brainApiKey) { brainApiKey.value = ''; brainApiKey.type = 'password'; }
+    if (brainKeyToggle) { brainKeyToggle.textContent = 'Show'; brainKeyToggle.setAttribute('aria-label', 'Show API key'); }
+    settingsReturnFocus?.focus();
   }
 
   settingsBtn?.addEventListener('click', openSettingsModal);
@@ -1694,12 +1765,23 @@ export function setupUI(): UIHandle {
     if (e.target === settingsModal) closeSettingsModal();
   });
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && settingsModal?.classList.contains('open')) closeSettingsModal();
-  });
+    if (!settingsModal?.classList.contains('open')) return;
+    if (e.key === 'Escape') {
+      e.preventDefault(); e.stopImmediatePropagation(); closeSettingsModal();
+    } else if (e.key === 'Tab') {
+      const focusable = Array.from(settingsModal.querySelectorAll<HTMLElement>('button, input, select, summary, [tabindex]'))
+        .filter(node => node.tabIndex >= 0 && !node.hasAttribute('disabled') && node.getClientRects().length > 0);
+      const target = e.shiftKey ? focusable.at(-1) : focusable[0];
+      if (document.activeElement === (e.shiftKey ? focusable[0] : focusable.at(-1))) {
+        e.preventDefault(); target?.focus();
+      }
+    }
+  }, true);
 
   settingsThemeSelect?.addEventListener('change', () => {
     const val = settingsThemeSelect.value;
     if (isThemeName(val)) applyTheme(val as UITheme);
+    syncSettingsTheme();
   });
 
   settingsEnvPreset?.addEventListener('change', () => {

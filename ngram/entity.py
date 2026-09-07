@@ -82,6 +82,7 @@ from ngram.models import (
     speaker_label_for_model,
 )
 from ngram.ngram_ar.spatial_tools import register_ngram_ar_spatial_tools
+from ngram.ngram_ar.spatial_sessions import connected_spatial_session
 from ngram.presence.autonomy_transcript import append_autonomy_transcript
 from ngram.presence.embodiment import Embodiment
 from ngram.presence.initiative import InitiativeEngine
@@ -3215,6 +3216,16 @@ class Entity:
                     "[Inner state: curiosity is high — using search_web or fetch_url "
                     "can feel natural when it serves the moment.]"
                 )
+        body = connected_spatial_session(self, tc.inp)
+        if body is not None:
+            preamble_parts.append(
+                "[Connected Spatial body]\n"
+                f"Session: {body.session_id}. Your spatial tools are available from this "
+                "conversation, including Telegram and autonomous turns. Use ar_inspect_surface "
+                "for the current body context, and ar_spawn_toy for physics toys. "
+                "Tool receipts distinguish completed actions from accepted requests and "
+                "unconfirmed delivery. View capture still requires the surface's Vision control."
+            )
         if isinstance(tc.inp.metadata, dict):
             ar_ctx = tc.inp.metadata.get("ngram_ar_context")
             if isinstance(ar_ctx, str) and ar_ctx.strip():

@@ -27,10 +27,10 @@ test('only the dark theme selects dark binary panel fallbacks', () => {
   assert.equal(themeUsesDarkPanels('dark'), true);
 });
 
-test('periwinkle owns the visible environment without changing other themes', () => {
+test('UI themes allow explicit scene environments to remain visible', () => {
   assert.equal(themeOverridesEnvironment('light'), false);
   assert.equal(themeOverridesEnvironment('dark'), false);
-  assert.equal(themeOverridesEnvironment('periwinkle'), true);
+  assert.equal(themeOverridesEnvironment('periwinkle'), false);
 });
 
 test('the WebXR shell exposes the periwinkle theme control and palette', async () => {
@@ -40,5 +40,14 @@ test('the WebXR shell exposes the periwinkle theme control and palette', async (
   assert.match(html, /id="theme-icon-periwinkle"/);
   assert.match(html, /--bg:\s*#6E7DFF/);
   assert.match(html, /--text:\s*#FFFFFF/);
-  assert.match(html, /--scene-bg-edge:\s*#6E7DFF/);
+  const palette = html.match(/\[data-theme="periwinkle"\]\s*\{([^}]+)\}/)[1];
+  const ui = palette.match(/--bg:\s*(#[\da-f]+)/i)[1];
+  const scene = palette.match(/--scene-bg-edge:\s*(#[\da-f]+)/i)[1];
+  const luminance = (hex) => {
+    const rgb = hex.slice(1).match(/../g).map(v => parseInt(v, 16) / 255)
+      .map(v => v <= .04045 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4);
+    return rgb[0] * .2126 + rgb[1] * .7152 + rgb[2] * .0722;
+  };
+  assert.ok((luminance(ui) + .05) / (luminance(scene) + .05) > 4,
+    'Periwinkle chrome must remain distinct from the graphite scene');
 });

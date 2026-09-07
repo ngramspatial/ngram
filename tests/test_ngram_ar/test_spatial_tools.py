@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import asyncio
+import json
+from types import SimpleNamespace
+
 import pytest
 
 from ngram.models import Input
 from ngram.ngram_ar.spatial_tools import register_ngram_ar_spatial_tools
+from ngram.ngram_ar.spatial_sessions import SpatialSession, SpatialSessions
 from ngram.presence.tools.registry import ToolRegistry
 from ngram.presence.tools.runtime import ToolRuntimeContext, reset_tool_runtime, set_tool_runtime
 from ngram.utils.ollama_client import ToolCallSpec
@@ -256,7 +261,7 @@ async def test_surface_tools_stream_when_platform_accepts_live_actions() -> None
 
 
 @pytest.mark.asyncio
-async def test_spatial_tools_do_not_emit_on_other_surfaces() -> None:
+async def test_spatial_tools_report_unavailable_without_connected_body() -> None:
     state = {}
     token = set_tool_runtime(
         ToolRuntimeContext(
@@ -272,5 +277,111 @@ async def test_spatial_tools_do_not_emit_on_other_surfaces() -> None:
     finally:
         reset_tool_runtime(token)
 
-    assert "only applies" in result
+    assert "no connected Spatial session" in result
     assert "_ngram_ar_spatial_actions" not in state
+
+
+@pytest.mark.parametrize("platform", ["telegram", "discord", "autonomous", "ngram_ar", None])
+@pytest.mark.asyncio
+async def test_any_surface_can_spawn_in_connected_body(platform) -> None:
+    delivered = []
+    sessions = SpatialSessions()
+
+    async def send(actions):
+        delivered.extend(actions)
+        session.acknowledge({
+            "completedActionId": actions[0]["actionId"], "status": "completed",
+        })
+
+    session = SpatialSession("desktop-body", send, lambda: {"mode": "desktop"})
+    sessions.register(session)
+    state = {}
+    token = set_tool_runtime(ToolRuntimeContext(
+        entity=SimpleNamespace(_ngram_ar_sessions=sessions),
+        inp=Input("spawn a ball", "person", "Person", channel="telegram-chat", platform=platform)
+        if platform else None,
+        state=state,
+    ))
+    try:
+        registry = _registry()
+        inspection = json.loads(await registry.execute(
+            ToolCallSpec(name="ar_inspect_surface", arguments={}),
+        ))
+        result = await registry.execute(ToolCallSpec(name="ar_spawn_toy", arguments={
+            "object_id": "purple-ball", "toy_type": "bouncy_ball", "color": "#800080",
+        }))
+    finally:
+        reset_tool_runtime(token)
+    assert inspection["sessionId"] == "desktop-body"
+    assert inspection["liveContext"] == {"mode": "desktop"}
+    assert "spawn_toy completed" in result
+    assert delivered[0]["sessionId"] == "desktop-body"
+    assert delivered[0]["toyType"] == "bouncy_ball"
+    assert delivered[0]["color"] == "#800080"
+    assert "_ngram_ar_spatial_actions" not in state
+
+
+@pytest.mark.asyncio
+async def test_delivery_waits_for_matching_receipt_and_reports_failure() -> None:
+    sent = asyncio.Event()
+    action = {}
+
+    async def send(actions):
+        action.update(actions[0])
+        sent.set()
+
+    session = SpatialSession("desktop", send, dict)
+    pending = asyncio.create_task(session.dispatch({"type": "action:request_capture"}))
+    await sent.wait()
+    session.acknowledge({"completedActionId": "wrong-action", "status": "completed"})
+    assert not pending.done()
+    session.acknowledge({
+        "completedActionId": action["actionId"],
+        "status": "failed", "error": "Vision is disabled by user",
+    })
+    result = await pending
+    assert "request_capture failed" in result
+    assert "Vision is disabled" in result
+    assert not session.pending
+
+
+@pytest.mark.asyncio
+async def test_timeout_and_disconnect_never_queue_replay() -> None:
+    delivered = []
+
+    async def send(actions):
+        delivered.extend(actions)
+
+    session = SpatialSession("desktop", send, dict)
+    result = await session.dispatch({"type": "action:spawn_toy"}, timeout=0.01)
+    assert "execution unknown" in result
+    assert not session.pending
+    pending = asyncio.create_task(session.dispatch({"type": "action:spawn_toy"}))
+    await asyncio.sleep(0)
+    session.close()
+    result = await pending
+    assert "disconnected" in result
+    assert "will not be replayed" in result
+    assert "unavailable" in await session.dispatch({"type": "action:spawn_toy"})
+    assert len(delivered) == 2
+
+
+def test_sessions_are_entity_scoped_and_select_only_one_body() -> None:
+    async def send(actions):
+        pass
+
+    sessions = SpatialSessions()
+    other_entity = SpatialSessions()
+    first = SpatialSession("first", send, dict)
+    latest = SpatialSession("latest", send, dict)
+    sessions.register(first)
+    sessions.register(latest)
+    assert sessions.select() is latest
+    assert sessions.select("first") is first
+    assert other_entity.select() is None
+    replacement = SpatialSession("latest", send, dict)
+    sessions.register(replacement)
+    sessions.unregister(latest)
+    assert sessions.select() is replacement
+    sessions.unregister(replacement)
+    assert sessions.select() is first

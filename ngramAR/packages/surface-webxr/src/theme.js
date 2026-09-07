@@ -19,5 +19,6 @@ export function themeUsesDarkPanels(value) {
 }
 
 export function themeOverridesEnvironment(value) {
-  return normalizeTheme(value) === 'periwinkle';
+  // UI color never suppresses an explicitly selected scene preset/background.
+  return false;
 }

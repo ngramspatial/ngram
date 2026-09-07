@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any, Callable
 from aiohttp import WSMsgType, web
 
 from ngram.cognition.context_status import context_reporter
+from ngram.ngram_ar.spatial_sessions import SpatialSession, SpatialSessions
 from ngram.presence.platforms.base import Platform
 
 if TYPE_CHECKING:
@@ -490,6 +491,7 @@ async def websocket_handler(request: web.Request) -> web.WebSocketResponse:
     shell_name: str = ""
     ar_cognition_context_md: str = ""
     spatial_context: dict[str, Any] = {}
+    spatial_session: SpatialSession | None = None
     active_external_turns: dict[str, dict[str, Any]] = {}
     unsubscribe_turn_activity: Callable[[], Awaitable[None]] | None = None
     local_agent_activity: dict[str, Any] | None = None
@@ -593,6 +595,19 @@ async def websocket_handler(request: web.Request) -> web.WebSocketResponse:
     async def emit_proactive(actions: list[dict[str, Any]]) -> None:
         await send_proactive(compose_local_agent_activity(actions))
 
+    async def send_body_actions(actions: list[dict[str, Any]]) -> None:
+        if ws.closed:
+            raise ConnectionError("Spatial session disconnected")
+        await ws.send_json({"type": "actions", "actions": actions})
+
+    def register_body() -> None:
+        nonlocal spatial_session
+        if spatial_session is None and bridge_session_id:
+            spatial_session = SpatialSession(
+                bridge_session_id, send_body_actions, lambda: dict(spatial_context),
+            )
+            entity._ngram_ar_sessions.register(spatial_session)
+
     async def emit_turn_activity(activity: dict[str, Any]) -> None:
         actions = _external_message_activity_actions(
             activity,
@@ -638,6 +653,10 @@ async def websocket_handler(request: web.Request) -> web.WebSocketResponse:
                     await ws.send_str(json.dumps({"type": "pong"}))
                     continue
                 if mtype == "session.start":
+                    if spatial_session is not None:
+                        entity._ngram_ar_sessions.unregister(spatial_session)
+                        spatial_session = None
+                    spatial_context = {}
                     if unsubscribe_turn_activity is not None:
                         await unsubscribe_turn_activity()
                         unsubscribe_turn_activity = None
@@ -652,6 +671,12 @@ async def websocket_handler(request: web.Request) -> web.WebSocketResponse:
                     shell_name = str(data.get("shellName") or "")
                     shell_slug = str(data.get("shellSlug") or "")
                     ar_cognition_context_md = str(data.get("arCognitionContextMarkdown") or "").strip()
+                    # The gateway retains readiness across a bridge reconnect.
+                    # Plain message/API sessions never register as a live body.
+                    ready = data.get("surfaceReady")
+                    if isinstance(ready, dict) and ready.get("type") == "event:shell_ready":
+                        spatial_context = _update_spatial_context({}, ready)
+                        register_body()
                     await ws.send_str(json.dumps({"type": "session.ready"}))
                     unsubscribe_turn_activity = activity_hub.subscribe(emit_turn_activity)
                     log.info(
@@ -708,7 +733,16 @@ async def websocket_handler(request: web.Request) -> web.WebSocketResponse:
                         await _send_actions(ws, eid, _speak_and_look(bridge_session_id or "", "…"))
                         continue
                     et = str(event.get("type") or "")
+                    if et == "event:action_completed":
+                        # Receipts must bypass Entity.perceive and its turn lock:
+                        # the active Telegram/AR tool may be awaiting this event.
+                        if spatial_session is not None:
+                            spatial_session.acknowledge(event)
+                        await _send_actions(ws, eid, [])
+                        continue
                     spatial_context = _update_spatial_context(spatial_context, event)
+                    if et == "event:shell_ready":
+                        register_body()
                     if et == "event:inference_control":
                         command = event.get("command")
                         if command not in {"pause", "resume", "status"}:
@@ -770,6 +804,8 @@ async def websocket_handler(request: web.Request) -> web.WebSocketResponse:
             elif msg.type in (WSMsgType.CLOSE, WSMsgType.ERROR):
                 break
     finally:
+        if spatial_session is not None:
+            entity._ngram_ar_sessions.unregister(spatial_session)
         to_cancel = list(pending_events)
         for task in to_cancel:
             task.cancel()
@@ -1016,6 +1052,8 @@ async def _handle_shell_event(
 
 async def create_bridge_app(entity: Entity) -> web.Application:
     app = web.Application()
+    if not isinstance(getattr(entity, "_ngram_ar_sessions", None), SpatialSessions):
+        entity._ngram_ar_sessions = SpatialSessions()
     activity_hub = _TurnActivityHub(entity)
     app["entity"] = entity
     app[_TURN_ACTIVITY_HUB_KEY] = activity_hub

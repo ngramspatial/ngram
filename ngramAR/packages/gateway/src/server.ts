@@ -16,6 +16,7 @@ import { resolvengramBinding } from "./resolve-ngram-binding.js";
 import { isngramEntityBinding, resolveEntityBridgeConfig } from "./resolve-entity-bridge.js";
 import { buildArCognitionContextMarkdown } from "./ar-cognition-context.js";
 import { MotionProviderClient } from "./motion-provider.js";
+import { VOICE_PROVIDERS, loadVoiceConfig, normalizeVoiceConfig, publicVoiceConfig, saveVoiceConfig, voiceEnvironmentKey } from './voice-config.js';
 import {
     BRAIN_PROVIDERS,
     loadBrainConfig,
@@ -58,6 +59,7 @@ export class NgramArServer {
     defaultShellSlug = null;
     motionProvider;
     brainConfig = null;
+    voiceConfig = null;
     surfaceToken = "";
     constructor(options) {
         this.options = options;
@@ -123,6 +125,7 @@ export class NgramArServer {
     }
     async start() {
         this.brainConfig = await loadBrainConfig(this.options.shellsDir);
+        this.voiceConfig = await loadVoiceConfig(this.options.shellsDir);
         this.sessionCleanupInterval = setInterval(() => this.cleanupSessions(), 60_000);
         const { port, host } = this.options;
         const protocol = this.isHttps ? "https" : "http";
@@ -212,6 +215,9 @@ export class NgramArServer {
         }
         const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
         const pathname = decodeURIComponent(url.pathname);
+        if (pathname === '/api/voice' || pathname === '/api/voice/preview') {
+            return this.handleVoiceSettings(req, res, pathname.endsWith('/preview'));
+        }
         if (pathname === "/api/openapi.json" && req.method === "GET") {
             return this.handleOpenApiSpec(res);
         }
@@ -769,7 +775,7 @@ binding:
                     sessionId = randomBytes(16).toString("hex");
                 let voice;
                 try {
-                    voice = createVoiceEngine(shell.voice);
+                    voice = createVoiceEngine(this.voiceConfig ?? shell.voice);
                 }
                 catch {
                     voice = { synthesize: async () => ({ audioBase64: "" }) };
@@ -885,6 +891,44 @@ binding:
             }
         }
         throw lastError ?? new Error("No Entity bridge accepted the brain configuration.");
+    }
+    async handleVoiceSettings(req, res, preview = false) {
+        res.setHeader('Cache-Control', 'no-store');
+        res.removeHeader('Access-Control-Allow-Origin');
+        const respond = (status, payload) => {
+            res.writeHead(status, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(payload));
+        };
+        if (!this.isSameOriginControlRequest(req)) return respond(403, { error: 'Voice settings are same-origin only.' });
+        try {
+            let current = this.voiceConfig;
+            if (!current && this.defaultShellSlug) current = (await loadShellDefinition(join(this.options.shellsDir, this.defaultShellSlug))).voice;
+            current ??= { provider: 'edge', voice: 'en-US-JennyNeural', speed: 1 };
+            if (!preview && req.method === 'GET') return respond(200, { config: publicVoiceConfig(current),
+                providers: VOICE_PROVIDERS.map(provider => ({ ...provider, hasApiKey: Boolean(voiceEnvironmentKey(provider.id)) })) });
+            if (req.method !== (preview ? 'POST' : 'PUT')) return respond(405, { error: 'Method not allowed.' });
+            const raw = await this.readBody(req);
+            if (Buffer.byteLength(raw, 'utf8') > 12000) return respond(413, { error: 'Voice settings payload is too large.' });
+            const config = normalizeVoiceConfig(JSON.parse(raw || '{}'), current);
+            const voice = createVoiceEngine(config);
+            if (preview) {
+                const sample = 'Hello from ngram. This is how I will sound in your space.';
+                try {
+                    const result = await voice.synthesize(sample);
+                    return respond(200, { ...result, text: sample, config: publicVoiceConfig(config) });
+                } catch {
+                    return respond(502, { error: 'Voice preview failed. Check your API key, voice ID, model, and provider connection.' });
+                }
+            }
+            await saveVoiceConfig(this.options.shellsDir, config);
+            this.voiceConfig = config;
+            for (const client of this.clients.values()) client.voice = voice;
+            for (const session of this.sessions.values()) session.voice = voice;
+            return respond(200, { config: publicVoiceConfig(config) });
+        } catch (error) {
+            const message = error instanceof SyntaxError ? 'Invalid voice settings.' : error.message;
+            return respond(400, { error: message });
+        }
     }
     async handleUpdateBrain(req, res) {
         if (!this.isSameOriginControlRequest(req)) {
@@ -1259,7 +1303,7 @@ binding:
         }
         let voice;
         try {
-            voice = createVoiceEngine(shell.voice);
+            voice = createVoiceEngine(this.voiceConfig ?? shell.voice);
         }
         catch (e) {
             logError(`Voice engine failed for "${shellSlug}", speech will be text-only:`, e);
@@ -1365,6 +1409,7 @@ binding:
             }));
             try {
                 const motionAction = await this.motionProvider.generate(action, sessionId);
+                if (action.actionId) motionAction.actionId = action.actionId;
                 if (deliveryEpoch !== (client.deliveryEpoch ?? 0))
                     return;
                 this.send(ws, motionAction);
@@ -1399,7 +1444,7 @@ binding:
             return;
         }
         log(`← ${event.type} (session ${sessionId})`);
-        if (event.type === "event:action_completed") {
+        if (event.type === "event:action_completed" && !event.completedActionId) {
             return;
         }
         if (event.type === "event:behavior_trigger" && behaviorRuntime) {
@@ -1456,6 +1501,7 @@ binding:
             const result = await voice.synthesize(action.text);
             action.audioData = result.audioBase64;
             action.visemes = result.visemes;
+            action.voiceConfig = result.voiceConfig;
         }
         catch (e) {
             logError("Voice synthesis failed, sending text-only:", e);

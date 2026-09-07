@@ -1,0 +1,65 @@
+{
+  "package": "@lobehub/icons-static-svg",
+  "version": "1.95.0",
+  "source": "https://github.com/lobehub/lobe-icons",
+  "archive": "https://registry.npmjs.org/@lobehub/icons-static-svg/-/icons-static-svg-1.95.0.tgz",
+  "integrity": "sha512-VSObF66DUVQe0EK3xbIoFcw+Fcia1+bLVFkMsQbmz0zCceMxPmoLImS5VM5SM7zL+/NarZ11/ySNfkekcomIkQ==",
+  "license": "MIT",
+  "icons": {
+    "openai": {
+      "sourcePath": "package/icons/openai.svg",
+      "originalSha256": "a595df6b423920c67a7f8f73c063e4bfb72d415948097b6cac063a2366bb5186",
+      "sha256": "f5edbc66d7d1a479d865293fa0cda61aeb8ed02a732fda39b7d4a71ebe2c0e69"
+    },
+    "anthropic": {
+      "sourcePath": "package/icons/anthropic.svg",
+      "originalSha256": "e833fdfa7e7187a86a05b870925067556a506dcd4239089aed73e1e58c9366a3",
+      "sha256": "226e65d3ce5f9d26b224db20d61bed7cf8aaac12a879a1a4c30b2269b6ebbf63"
+    },
+    "gemini": {
+      "sourcePath": "package/icons/gemini-color.svg",
+      "originalSha256": "8ab0a9bafec11f7e69bcb9fc4ffd8f1bc927d1ddcbbb6ff36dee5ae8b5a9d602",
+      "sha256": "915ca1c97feec53c8cac92e08e9b42e128e096de3cd7535c82238dfdf28fce79"
+    },
+    "openrouter": {
+      "sourcePath": "package/icons/openrouter.svg",
+      "originalSha256": "ae671cc83de9bd45db97a47ed5e38a4e1bd9f93a12be495ba4b4f8b284026bca",
+      "sha256": "1ad8a3353691dd63d8542b9b581406de0a031b94f46ed676cf372e565f7c2d1c"
+    },
+    "xai": {
+      "sourcePath": "package/icons/xai.svg",
+      "originalSha256": "89eb7de9f0d02a41cfecd9109e253d7fd3529e27467dee4254faa67f3ac21451",
+      "sha256": "f3e74b622448edb8d0094589df305fe33ff1911fe55a22d09c1dbb5236082029"
+    },
+    "groq": {
+      "sourcePath": "package/icons/groq.svg",
+      "originalSha256": "078d5cf6e7a54905040c15ddacf5ea33c13042fe7739e820cedc2096e4406651",
+      "sha256": "6000119bfa8ecd1ced20cd1d121f17ad491dc1eafb673138ea47df420bf51f05"
+    },
+    "together": {
+      "sourcePath": "package/icons/together-color.svg",
+      "originalSha256": "27ccaf118a431c386b88418a34a4346afd9638dde10e3f2295db2eec1fa5898a",
+      "sha256": "b0064d9eeabb47178b2b64beef81d478137ff908ac2fe817a9ec51b4e4b6b773"
+    },
+    "fireworks": {
+      "sourcePath": "package/icons/fireworks-color.svg",
+      "originalSha256": "f1c4782b86bc03a36323fd68ad6cc376c6b2ebe57b701cc958ebd6b8d37effd6",
+      "sha256": "a2cc2c844b1f3eef7241847de548c5513c42e913f8975d731cfc8e35607edd0c"
+    },
+    "mistral": {
+      "sourcePath": "package/icons/mistral-color.svg",
+      "originalSha256": "722f74b289d95486b43662fe24fa883b333701296f618406cd0ed502299170b6",
+      "sha256": "e981c1836109f7aaacfb4138e7c43aee550a88627b0a7f1074a5512768883d34"
+    },
+    "deepseek": {
+      "sourcePath": "package/icons/deepseek-color.svg",
+      "originalSha256": "deba5f98a5c1796e20fcac3149bcd7eb8a32f0bdd04d048819400b1f28bd1439",
+      "sha256": "edb0935b3a8684e2c56f19ee50386632e1a078d46b2d2c3e2c54e9017b12ac69"
+    },
+    "venice": {
+      "sourcePath": "package/icons/venice.svg",
+      "originalSha256": "2199c468fef49ebadfdabd4280461d700c290daaf9ab03fbf94564f9230538ee",
+      "sha256": "1d22b3c45b74ad88ff8a6f840927b664b38ab485aa2b27258fb05feff908fe5a"
+    }
+  }
+}
