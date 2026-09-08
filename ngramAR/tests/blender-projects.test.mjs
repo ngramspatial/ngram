@@ -76,8 +76,46 @@ test('Gateway streams configured Blender artifacts without forwarding secrets or
     assert.equal((await fetch(base + '/model/status')).status, 502, 'Reject upstream redirects');
     assert.equal((await fetch(base + '/model/1/secrets.env')).status, 404);
     assert.equal((await fetch(base + '/model/stop')).status, 404, 'Stop cannot be triggered with GET');
+    assert.equal((await fetch(base + '/model/stop', { method: 'POST', headers: { Origin: 'https://untrusted.invalid' } })).status, 403);
     assert.equal(requests.length, 2);
   } finally {
     for (const server of [gateway, upstream]) { server.closeAllConnections(); await new Promise(r => server.close(r)); }
+  }
+});
+
+test('A failed scene restore cannot overwrite saved creations during autosave or page hide', async () => {
+  const folder = await mkdtemp(join(tmpdir(), 'ngram-restore-'));
+  const previous = { window: globalThis.window, document: globalThis.document, localStorage: globalThis.localStorage };
+  let service;
+  try {
+    await build({ stdin: { contents: `export {CreationService} from './packages/surface-webxr/src/creation-service.ts'; export {WorldStore} from './packages/core/src/world-store.ts';`, resolveDir: resolve('.') }, bundle: true, platform: 'node', format: 'esm', outfile: join(folder, 'test.mjs'), logLevel: 'silent' });
+    const { CreationService, WorldStore } = await import(pathToFileURL(join(folder, 'test.mjs')));
+    const listeners = new Map();
+    const corrupt = '{"active":"workspace","worlds":';
+    let saved = corrupt;
+    globalThis.window = { addEventListener: (name, fn) => listeners.set(name, fn) };
+    globalThis.document = { addEventListener() {} };
+    globalThis.localStorage = { getItem: () => saved, setItem: (_key, value) => { saved = value; } };
+    const entries = new Map();
+    const store = new WorldStore({ commit(_before, after) {
+      entries.clear();
+      for (const spec of after.entities) entries.set(spec.id, { spec, status: 'ready' });
+    } });
+    service = new CreationService({ store, entries, pause() {} });
+    await service.restore();
+    assert.match(service.storageError, /Saved data is preserved/);
+    assert.equal(service.save().saved, false);
+    listeners.get('pagehide')();
+    assert.equal(saved, corrupt, 'Keep the original bytes available for repair');
+    const repaired = { world: store.checkpoint(), programs: [] };
+    assert.equal((await service.handle('import', repaired)).saved, true);
+    assert.equal(service.storageError, null);
+    assert.ok(JSON.parse(saved).worlds[store.document.id]);
+  } finally {
+    clearTimeout(service?.saveTimer);
+    clearInterval(service?.blender.timer);
+    service?.programs.dispose();
+    Object.assign(globalThis, previous);
+    await rm(folder, { recursive: true, force: true });
   }
 });

@@ -14,6 +14,7 @@ export class CreationService {
   onChange = null;
   saveTimer = null;
   storageError = null;
+  restoreError = null;
   surfaceContext = null;
   legacyObjects = null;
   perform = null;
@@ -45,12 +46,13 @@ export class CreationService {
       if (!library.worlds || typeof library.worlds !== "object")
         throw Error("Invalid creation library");
       const current = library.worlds[library.active];
-      if (!current) return;
+      if (!current) throw Error("Saved creation library has no active world");
       this.library = library;
       await this.loadDocument(current);
       this.world.pause(true);
     } catch (error) {
-      this.storageError = String(error.message);
+      this.restoreError = `Could not restore creations: ${error.message}. Saved data is preserved; import a repaired world to resume saving.`;
+      this.storageError = this.restoreError;
       this.onChange?.();
     }
   }
@@ -62,6 +64,9 @@ export class CreationService {
     };
   }
   save(name?) {
+    // Page-hide and autosave must never replace a failed restore with an empty scene.
+    if (this.restoreError)
+      return { id: this.library.active, saved: false, error: this.restoreError };
     if (name) this.world.store.document.name = String(name).slice(0, 160);
     this.library.active = this.world.store.document.id;
     this.library.worlds[this.library.active] = this.export();
@@ -108,6 +113,8 @@ export class CreationService {
     for (const p of doc.programs)
       await this.programs.install(p, { start: false });
     this.blender.restore(doc.blender);
+    this.restoreError = null;
+    this.storageError = null;
   }
   async pause() {
     this.cancelPerformance?.();

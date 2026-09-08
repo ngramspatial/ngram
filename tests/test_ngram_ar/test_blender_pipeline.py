@@ -4,7 +4,7 @@ import asyncio
 import base64
 import json
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -14,6 +14,33 @@ from ngram.ngram_ar.spatial_sessions import SpatialSession, SpatialSessions
 from ngram.presence.tools.blender_runtime import BlenderRuntime
 from ngram.presence.tools.execution_rpc import ExecutionRPCClient
 from ngram.presence.tools.runtime import ToolRuntimeContext, reset_tool_runtime, set_tool_runtime
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('tool_name', ['ar_world', 'ar_blender'])
+async def test_spatial_build_steps_continue_but_identical_polling_is_bounded(tool_name):
+    from ngram.entity import Entity
+    from ngram.inference.types import ToolCallSpec
+
+    entity = object.__new__(Entity)
+    entity.tools = SimpleNamespace(execute=AsyncMock(return_value='{"ok":true}'))
+    entity.current_platform = None
+    entity.tonic = SimpleNamespace(emit=Mock())
+    entity.self_model = SimpleNamespace(record_tool_result=AsyncMock())
+    state = {}
+    for command in ['capabilities', 'observe', 'apply', 'program', 'resume', 'observe']:
+        result = await entity._tool_exec(ToolCallSpec(name=tool_name, arguments={'command': command}), state=state)
+        assert json.loads(result)['ok']
+    assert entity.tools.execute.await_count == 6
+    state = {}
+    for _ in range(3):
+        await entity._tool_exec(ToolCallSpec(name=tool_name, arguments={'command': 'status', 'payload': {}}), state=state)
+    blocked = await entity._tool_exec(ToolCallSpec(name=tool_name, arguments={'payload': {}, 'command': 'status'}), state=state)
+    assert 'same' in json.loads(blocked)['error']
+    assert entity.tools.execute.await_count == 9
+    # A substantive new request is allowed after the duplicate polling guard fires.
+    result = await entity._tool_exec(ToolCallSpec(name=tool_name, arguments={'command': 'stop'}), state=state)
+    assert json.loads(result)['ok']
 
 
 @pytest.mark.asyncio

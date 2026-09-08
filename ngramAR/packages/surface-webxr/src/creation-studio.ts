@@ -226,7 +226,7 @@ export function attachCreationStudio(
       const project = service.blender.forEntity(id);
       if (project) {
         const live = service.blender.inspect(project);
-        make('p', `Blender · revision ${live.displayedRevision ?? 'loading'}${live.pending ? ' · update queued' : ''}${project.paused ? ' · updates paused' : ''}`, inspector).className = 'muted';
+        make('p', `Blender · ${project.state ?? 'connected'} · revision ${live.displayedRevision ?? 'loading'}${live.pending ? ' · update queued' : ''}${project.paused ? ' · updates paused' : ''}`, inspector).className = 'muted';
         if (project.error) make('p', project.error, inspector).className = 'status';
         button(project.paused ? 'Resume updates' : 'Pause updates', () => service.blender.command(id, project.paused ? 'resume' : 'pause'), actions);
         button('Refresh project', () => service.blender.command(id, 'refresh'), actions);
@@ -366,6 +366,8 @@ export function attachCreationStudio(
     queued = false;
   function refresh() {
     queued = false;
+    const editing = inspector.contains(document.activeElement) &&
+      document.activeElement?.matches('input, textarea, select');
     pause.textContent = service.world.paused
       ? "Resume creations"
       : "Pause creations";
@@ -384,7 +386,7 @@ export function attachCreationStudio(
     ]);
     if (signature !== lastSignature) {
       lastSignature = signature;
-      if (input.selected && !inspector.contains(document.activeElement)) inspect(input.selected);
+      if (input.selected && !editing) inspect(input.selected);
       list.replaceChildren();
       for (const e of entries) {
         const b = button(
@@ -429,7 +431,7 @@ export function attachCreationStudio(
     if (
       selectedEntry?.spec.asset &&
       inspectorAssetStatus !== selectedEntry.status &&
-      !inspector.contains(document.activeElement)
+      !editing
     )
       inspect(input.selected);
     root.dataset.revision = String(service.world.store.document.revision);

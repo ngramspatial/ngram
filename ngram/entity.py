@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import hashlib
 import json
 import math
 import os
@@ -1799,13 +1800,22 @@ class Entity:
         inp: Input | None = None,
         state: dict[str, Any] | None = None,
     ) -> str:
+        # Multipurpose tools may inspect, edit and verify in consecutive calls.
+        # Block repeated requests, not productive use of the same interface.
+        request_fingerprint = hashlib.sha256(
+            json.dumps(spec.arguments, sort_keys=True, default=str).encode()
+        ).hexdigest()
         if state is not None:
             repeat_key = "_consecutive_calls"
             prev = state.get(repeat_key) or {}
-            if prev.get("tool") == spec.name and prev.get("count", 0) >= 3:
+            if (
+                prev.get("tool") == spec.name
+                and prev.get("request") == request_fingerprint
+                and prev.get("count", 0) >= 3
+            ):
                 log.info("tool_repeat_blocked", tool=spec.name, consecutive=prev["count"])
                 return json.dumps({
-                    "error": f"You have already called {spec.name} {prev['count']} times this turn. "
+                    "error": f"You have repeated the same {spec.name} request {prev['count']} times consecutively. "
                     "Stop retrying. Tell the user what you found (or didn't find), or try a completely "
                     "different approach. If there's nothing there, just say so."
                 })
@@ -1845,10 +1855,11 @@ class Entity:
             else:
                 state["tool_failures"] = int(state.get("tool_failures") or 0) + 1
             prev_repeat = state.get("_consecutive_calls") or {}
-            if prev_repeat.get("tool") == spec.name:
-                state["_consecutive_calls"] = {"tool": spec.name, "count": prev_repeat.get("count", 0) + 1}
+            if prev_repeat.get("tool") == spec.name and prev_repeat.get("request") == request_fingerprint:
+                repeat_count = prev_repeat.get("count", 0) + 1
             else:
-                state["_consecutive_calls"] = {"tool": spec.name, "count": 1}
+                repeat_count = 1
+            state["_consecutive_calls"] = {"tool": spec.name, "request": request_fingerprint, "count": repeat_count}
             previews = state.setdefault("tool_output_previews", [])
             if isinstance(previews, list):
                 previews.append(

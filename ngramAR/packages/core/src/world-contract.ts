@@ -469,7 +469,7 @@ export const WORLD_API_HELP = {
     physics:
       "optional {mode:fixed|dynamic|kinematic,mass,restitution,friction,damping,gravity:[0,-9.81,0]}",
     control:
-      "control kind: {type:button|toggle|slider,label,value,min,max,step}",
+      "control kind: {type:button|toggle|slider,label,value:number,min:number,max:number,step:number}. Toggle values are numeric 0 (off) or 1 (on), not booleans.",
     grabbable: true,
     visible: true,
   },
