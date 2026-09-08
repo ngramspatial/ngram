@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Keep the work-status panel out of ordinary chat and quick tool calls. Show coding goals, execution lasting at least 15 seconds, or multiple authoring steps spanning 30 seconds; retain status across subsequent work phases and hide it immediately on completion. Place speech captions and activity in one vertical layout so expanded details cannot cover messages.
 - Show observed model requests, retries, tool execution and Blender rendering above the Spatial message box, with elapsed time, request limits and recent stages. Heartbeats identify a live worker without claiming new progress; disconnected or silent telemetry is marked explicitly. Active work is replayed on reconnect, and coding goals have separate activity from chat.
 - Replace the blocking multi-phase coding tool with durable background goals. Goals recover saved work after restarts, support status/resume/cancel, pause when their runtime budget expires (six hours by default), and require tool evidence plus a fresh verification phase before completion.
 - Give agents visual feedback from Blender renders and independent Spatial inspection cameras, and support private message attachments stored on the existing execution worker.

@@ -793,16 +793,13 @@
 
     /* ═══ Subtitle Band ═══ */
     .subtitle-band {
-      position: fixed;
-      bottom: 100px;
-      left: var(--scene-sidebar-w);
-      right: 0;
-      transition: left 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-      display: flex;
+      width: 100%;
+      display: none;
+      flex-shrink: 0;
       justify-content: center;
       pointer-events: none;
-      z-index: 15;
     }
+    .subtitle-band:has(.subtitle-inner.visible) { display: flex; }
     .subtitle-inner {
       max-width: 725px;
       width: 88%;
@@ -834,8 +831,6 @@
       font-weight: 600;
       margin-right: 6.25px;
     }
-
-    body.sidebar-collapsed .subtitle-band { left: 0; }
 
     /* ═══ Command Bar ═══ */
     .command-bar {
@@ -1430,7 +1425,6 @@
     body.sidebar-collapsed .devpanel { left: 0; }
     body.devpanel-open .devpanel { transform: translateY(0); }
     body.devpanel-open .viewport-container { bottom: var(--scene-devpanel-h); }
-    body.devpanel-open .subtitle-band { bottom: calc(var(--devpanel-h) + 100px); }
     body.devpanel-open .command-bar { bottom: calc(var(--devpanel-h) + 25px); }
     body.panel-resizing .devpanel { transition: none; }
     body.panel-resizing.devpanel-open .viewport-container,
@@ -2618,6 +2612,7 @@
   </div>
 
   <!-- ═══ Subtitle Band ═══ -->
+  <div class="command-bar">
   <div class="subtitle-band">
     <div class="subtitle-inner" id="subtitle">
       <span class="subtitle-speaker" id="subtitle-speaker"></span>
@@ -2626,7 +2621,6 @@
   </div>
 
   <!-- ═══ Command Bar ═══ -->
-  <div class="command-bar">
     <section id="work-status" class="work-status" aria-label="Agent activity" hidden></section>
     <div class="command-inner">
       <div class="command-input-wrap">

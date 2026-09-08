@@ -6,7 +6,18 @@ export interface WorkStatus {
   retryDelayMs?: number; tool?: string; operation?: string; project?: string; revision?: number;
   phase?: number; mode?: string;
 }
-type Record = { event: WorkStatus; received: number; history: string[] };
+type Record = { event: WorkStatus; received: number; history: string[];
+  substantial: boolean; authoringSteps: number; authoringStartedMs?: number };
+const AUTHORING_TOOLS = new Set(['execute_python', 'execute_javascript', 'apply_patch', 'write_file', 'append_file']);
+const EXECUTION_TOOLS = new Set([...AUTHORING_TOOLS, 'run_command', 'run_background', 'check_process']);
+function isAuthoring(event: WorkStatus): boolean {
+  return event.stage === 'rendering' || (event.stage === 'tool_running' && (
+    AUTHORING_TOOLS.has(event.tool ?? '') ||
+    (event.tool === 'ar_blender' && ['execute', 'publish', 'render'].includes(event.operation ?? ''))));
+}
+function isExecution(event: WorkStatus): boolean {
+  return isAuthoring(event) || (event.stage === 'tool_running' && EXECUTION_TOOLS.has(event.tool ?? ''));
+}
 export function duration(ms: number): string {
   const seconds = Math.max(0, Math.floor(ms / 1000));
   if (seconds < 60) return `${seconds}s`;
@@ -37,11 +48,20 @@ export class WorkStatusStore {
         && event.instanceId === old.event.instanceId) return false;
     if (old && (event.timestamp < old.event.timestamp ||
         (event.instanceId === old.event.instanceId && event.sequence <= old.event.sequence))) return false;
-    const history = old?.history ?? [];
+    const previous = old?.event.instanceId === event.instanceId ? old : undefined;
+    const history = previous?.history ?? [];
     const label = stageLabel(event);
     if (!event.heartbeat && (!old || label !== stageLabel(old.event)))
       history.push(`${duration(event.elapsedMs)} · ${label}`);
-    this.records.set(event.runId, { event, received: now, history: history.slice(-8) });
+    const newAuthoringStep = isAuthoring(event) && !event.heartbeat && (!previous ||
+      previous.event.stage !== event.stage || previous.event.tool !== event.tool || previous.event.operation !== event.operation);
+    const finishedLongExecution = previous && isExecution(previous.event)
+      && (previous.event.stage !== event.stage || previous.event.tool !== event.tool)
+      && event.elapsedMs - (previous.event.elapsedMs - previous.event.stageElapsedMs) >= 15000;
+    this.records.set(event.runId, { event, received: now, history: history.slice(-8),
+      substantial: (previous?.substantial ?? false) || !!finishedLongExecution,
+      authoringSteps: (previous?.authoringSteps ?? 0) + Number(newAuthoringStep),
+      authoringStartedMs: previous?.authoringStartedMs ?? (newAuthoringStep ? event.elapsedMs : undefined) });
     // Retain a small terminal-state history while never hiding concurrent active goals.
     for (const [id, record] of this.records) {
       if (this.records.size <= 12) break;
@@ -57,7 +77,18 @@ export class WorkStatusStore {
     }
   }
   views(now = Date.now()) {
-    return [...this.records.values()].filter(r => r.event.status === 'running' || now - r.received < 15000)
+    return [...this.records.values()].filter(record => {
+      const { event, received } = record;
+      // A slow chat response, retry or lookup is not evidence of a coding job.
+      // Once real work qualifies, keep its subsequent model/tool phases visible.
+      if (event.status !== 'running') return false;
+      const liveAge = this.connected && now - received <= 35000 ? Math.max(0, now - received) : 0;
+      if (event.scope === 'code_task'
+          || (isExecution(event) && event.stageElapsedMs + liveAge >= 15000)
+          || (record.authoringSteps >= 2 && event.elapsedMs - (record.authoringStartedMs ?? event.elapsedMs) >= 30000))
+        record.substantial = true;
+      return record.substantial;
+    })
       .map(({ event, received, history }) => {
         const active = event.status === 'running';
         const since = Math.max(0, now - received);

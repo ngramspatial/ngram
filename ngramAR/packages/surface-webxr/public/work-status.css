@@ -1,4 +1,4 @@
-.work-status { width: min(775px, 88%); display: grid; gap: 6px; pointer-events: auto; }
+.work-status { width: min(775px, 88%); display: grid; gap: 6px; pointer-events: auto; max-height: min(300px, 35dvh); overflow-y: auto; flex-shrink: 1; }
 .work-status[hidden] { display: none; }
 .work-status-row { border: 1px solid var(--border-focus); border-radius: 12px; background: var(--glass-heavy); color: var(--text); font: 11px/1.6 var(--font-body); box-shadow: var(--shadow-sm); overflow: hidden; }
 .work-status-row summary { display: flex; gap: 12px; align-items: center; padding: 9px 13px; cursor: pointer; list-style: none; }

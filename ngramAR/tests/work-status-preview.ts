@@ -14,6 +14,8 @@ function button(name, action) {
 const update = (data = {}) => activity.update({ runId: 'preview', instanceId: 'first', sequence: ++sequence,
   timestamp: Date.now(), scope: 'turn', status: 'running', stage: 'model_wait', elapsedMs: 540000,
   stageElapsedMs: 540000, idleMs: 540000, attempt: 1, maxAttempts: 3, timeoutMs: 1800000, ...data });
+button('Normal chat', () => { activity.clear(); update(); });
+button('Quick tool', () => { activity.clear(); update({ stage: 'tool_running', tool: 'run_command', elapsedMs: 2000, stageElapsedMs: 200 }); });
 button('Model wait', () => update());
 button('Retry', () => update({ stage: 'retry_wait', attempt: 2, retryDelayMs: 8000, stageElapsedMs: 0, idleMs: 0 }));
 button('Blender', () => update({ stage: 'rendering', project: 'orion', revision: 3, attempt: undefined, timeoutMs: undefined, stageElapsedMs: 32000, idleMs: 10000 }));
@@ -21,6 +23,21 @@ button('Goal', () => update({ runId: 'goal', scope: 'code_task', phase: 4, mode:
 button('Disconnect', () => activity.setConnected(false));
 button('Reconnect', () => { activity.setConnected(true); update(); });
 button('Complete', () => update({ status: 'complete' }));
+button('Complete all', () => {
+  for (const record of [...activity.store.records.values()]) activity.update({ ...record.event, status: 'complete', sequence: ++sequence, timestamp: Date.now() });
+});
+function caption(speaker, text) {
+  document.getElementById('subtitle-speaker')!.textContent = speaker + ':';
+  document.getElementById('subtitle-text')!.textContent = text;
+  document.getElementById('subtitle')!.classList.add('visible');
+}
+button('Your message', () => caption('You', 'Keep improving the model while I test its grip.'));
+button('Agent reply', () => caption('Rook', 'The guard is finished. I am checking the new material and grip in the next render, then comparing them against the previous revision.'));
+button('Hide caption', () => document.getElementById('subtitle')!.classList.remove('visible'));
+button('Narrow layout', () => {
+  const bar = document.querySelector('.command-bar') as HTMLElement;
+  bar.style.width = bar.style.width ? '' : '360px';
+});
 button('Theme', () => { const html = document.documentElement; html.dataset.theme = html.dataset.theme === 'light' ? 'dark' : html.dataset.theme === 'dark' ? 'periwinkle' : 'light'; });
 update();
 setInterval(() => {
