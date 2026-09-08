@@ -1,9 +1,4 @@
-"""Interactive local-first product setup: ``ngram setup``.
-
-The normal paths keep the Entity runtime on this machine and use either Ollama
-or a hosted API. The home-gateway + Cloudflare + Railway topology remains an
-explicit advanced profile rather than a first-run requirement.
-"""
+"""Cloud-first product setup: hosted thinking and memory, a persistent Railway home."""
 
 from __future__ import annotations
 
@@ -507,15 +502,18 @@ def _hosted_prompt(
     return _prompt_line(label)
 
 
-def _run_hosted_flow(env_path: Path) -> None:
-    """Configure a provider API while keeping the full Entity runtime local."""
-    click.echo("\n--- Hosted API brain (no Cloudflare, tunnel, or remote worker) ---\n")
-    click.echo(
-        "Model prompts and embedding inputs go to the provider you choose. Identity, memory,\n"
-        "relationships, tool execution, and the AR bridge remain in the local ngram runtime.\n"
-        "Configured web or messaging tools may make their own network calls. The API key is\n"
-        "written only to the gitignored .env file and is never sent to the browser.\n"
-    )
+def _run_hosted_flow(env_path: Path, *, cloud: bool = False) -> None:
+    """Collect a complete provider route for the selected runtime location."""
+    click.echo("\n--- Hosted thinking + semantic memory ---\n")
+    if cloud:
+        click.echo("Your API key powers chat and memory embeddings. The Entity and its files live on Railway.\n")
+    else:
+        click.echo(
+            "Model prompts and embedding inputs go to the provider you choose. Identity, memory,\n"
+            "relationships, tool execution, and the AR bridge remain in the local ngram runtime.\n"
+            "Configured web or messaging tools may make their own network calls. The API key is\n"
+            "written only to the gitignored .env file and is never sent to the browser.\n"
+        )
     provider = click.prompt(
         "Provider",
         type=click.Choice(HOSTED_PROVIDERS, case_sensitive=False),
@@ -541,7 +539,7 @@ def _run_hosted_flow(env_path: Path) -> None:
 
     api_key = validate_secret(api_key)
     base_url = validate_api_base_url(base_url, required=provider == "custom")
-    if click.confirm("Verify the model catalog and 768-dimensional memory now?", default=True):
+    if cloud or click.confirm("Verify the model catalog and 768-dimensional memory now?", default=True):
         click.echo("Checking hosted inference and memory embeddings…")
         model_found, dimensions = asyncio.run(
             _probe_provider(
@@ -553,6 +551,8 @@ def _run_hosted_flow(env_path: Path) -> None:
             )
         )
         if not model_found:
+            if cloud:
+                raise click.ClickException("That chat model is not in the provider catalog. Choose an available model ID.")
             click.echo(
                 "Warning: the provider responded, but that chat model was not in its catalog.",
                 err=True,
@@ -560,7 +560,7 @@ def _run_hosted_flow(env_path: Path) -> None:
         click.echo(f"[ok] Hosted memory returned {dimensions} dimensions.")
 
     updates = {
-        "NGRAM_DEPLOYMENT_MODE": "local",
+        "NGRAM_DEPLOYMENT_MODE": "cloud" if cloud else "local",
         "NGRAM_INFERENCE_PROVIDER": provider,
         "NGRAM_INFERENCE_BASE_URL": base_url,
         "NGRAM_INFERENCE_API_KEY_ENV": key_env,
@@ -804,11 +804,11 @@ def run_setup_wizard(
     env_path = _dotenv_path()
 
     click.echo("")
-    click.echo(click.style("ngram setup", fg="cyan", bold=True))
+    click.echo(click.style("  ngram  /  A little presence. A world of possibility.", fg="bright_blue", bold=True))
     click.echo(
-        "Start locally in minutes. Cloudflare, Railway, and public networking are not required.\n"
-        "Choose hosted for the fastest path on any computer, local for Ollama and full privacy,\n"
-        "or hybrid only when you intentionally want an always-on cloud body using a home GPU.\n"
+        "\n  A mind that remembers. A home in the cloud. A place in your world.\n\n"
+        "  Recommended: your API key + Railway worker + persistent Linux workspace.\n"
+        "  Hosted embeddings and durable memory are included. No local models required.\n"
     )
     click.echo(f"Repo: {root}")
     click.echo(f".env: {env_path}\n")
@@ -825,15 +825,22 @@ def run_setup_wizard(
     if p == "ask":
         click.echo(
             "Setup modes:\n"
-            "  hosted  Fastest: provider API + complete Entity runtime on this machine\n"
+            "  cloud   Recommended: API thinking + embeddings, Railway worker + durable memory\n"
+            "  hosted  Advanced: provider API + complete Entity runtime on this machine\n"
             "  local   Private: Ollama + complete Entity runtime on this machine\n"
             "  hybrid  Advanced: home inference gateway + Cloudflare Access + Railway\n"
         )
         p = click.prompt(
             "Choose a setup mode",
-            type=click.Choice(["hosted", "local", "hybrid"], case_sensitive=False),
-            default="hosted",
+            type=click.Choice(["cloud", "hosted", "local", "hybrid"], case_sensitive=False),
+            default="cloud",
         ).lower()
+
+    if p == "cloud":
+        from ngram.cloud_setup import run_cloud_setup
+
+        run_cloud_setup(root, env_path)
+        return
 
     hybrid_base: str | None = None
     hybrid_tok: str | None = None

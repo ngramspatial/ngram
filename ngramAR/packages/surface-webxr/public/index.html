@@ -18,6 +18,7 @@
   <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
   <link rel="preload" href="/fonts/AzeretMono-Variable.ttf" as="font" type="font/ttf" crossorigin />
   <link rel="stylesheet" href="/fonts/azeret-mono.css" />
+  <link rel="stylesheet" href="/onboarding.css" />
   <style>
     /* ═══════════════════ Theme tokens ═══════════════════ */
     :root,
@@ -2553,7 +2554,7 @@
         </div>
         <button class="sidebar-new-btn" id="create-agent-btn">
           <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2Z"/></svg>
-          New Shell
+          New ngram
         </button>
         <div class="agent-list">
         </div>
@@ -2878,44 +2879,7 @@
   </div>
 
   <!-- ═══ Create Agent Modal ═══ -->
-  <div class="modal-backdrop" id="create-modal">
-    <div class="modal">
-      <div class="modal-header">
-        <div>
-          <div class="modal-title">New Shell</div>
-          <div class="modal-subtitle">Give an existing ngram Entity a body</div>
-        </div>
-        <button class="modal-close" id="create-modal-close" aria-label="Close">
-          <svg viewBox="0 0 24 24"><path d="M18.3 5.71a1 1 0 0 0-1.41 0L12 10.59 7.11 5.7A1 1 0 0 0 5.7 7.11L10.59 12 5.7 16.89a1 1 0 1 0 1.41 1.41L12 13.41l4.89 4.89a1 1 0 0 0 1.41-1.41L13.41 12l4.89-4.89a1 1 0 0 0 0-1.4Z"/></svg>
-        </button>
-      </div>
-      <div class="modal-body">
-        <div class="modal-field">
-          <label class="modal-label" for="create-name">Name</label>
-          <input class="modal-input" id="create-name" type="text" placeholder="e.g. Nova, Echo, Sage..." autocomplete="off" />
-        </div>
-        <div class="modal-row">
-          <div class="modal-field">
-            <label class="modal-label" for="create-voice">Voice</label>
-            <select class="modal-select" id="create-voice">
-              <option value="en-US-JennyNeural" selected>Jenny</option>
-              <option value="en-US-GuyNeural">Guy</option>
-              <option value="en-US-AriaNeural">Aria</option>
-              <option value="en-GB-SoniaNeural">Sonia</option>
-              <option value="en-GB-RyanNeural">Ryan</option>
-            </select>
-          </div>
-        </div>
-        <div class="modal-field">
-          <div class="modal-hint">This creates the body only. Identity and memory stay with the Entity you pair through <code>ngram ar setup</code>.</div>
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button class="modal-btn" id="create-modal-cancel">Cancel</button>
-        <button class="modal-btn modal-btn-primary" id="create-modal-submit">Create Shell</button>
-      </div>
-    </div>
-  </div>
+  <div class="modal-backdrop" id="create-modal"></div>
 
   <!-- ═══ Settings Modal ═══ -->
   <div class="modal-backdrop" id="settings-modal" hidden>
@@ -2942,8 +2906,8 @@
               <div class="brain-live-pill" title="Currently configured model"><span class="brain-live-dot" aria-hidden="true"></span><span id="brain-active-label">Loading…</span></div>
             </div>
             <div class="brain-mode-switch" role="tablist" aria-label="Inference mode">
-              <button class="brain-mode" type="button" data-brain-mode="frontier" role="tab">Cloud API</button>
-              <button class="brain-mode active" type="button" data-brain-mode="private" role="tab">Private GPU</button>
+              <button class="brain-mode active" type="button" data-brain-mode="frontier" role="tab">Cloud API</button>
+              <button class="brain-mode" type="button" data-brain-mode="private" role="tab">Private GPU</button>
               <button class="brain-mode" type="button" data-brain-mode="local" role="tab">Local</button>
             </div>
             <div id="brain-provider-picker" class="brain-hidden">
@@ -2952,8 +2916,8 @@
             </div>
             <div class="brain-connection-card">
               <div class="brain-mode-note" id="brain-note-local"><h3>On your machine</h3><p>Connect a local runtime such as Ollama. Your entity worker must run on the same machine.</p></div>
-              <div class="brain-mode-note visible" id="brain-note-private"><h3>Your private GPU</h3><p>Use the inference gateway configured for your entity.</p></div>
-              <div class="brain-mode-note" id="brain-note-frontier"><h3 id="brain-provider-title">Provider connection</h3><p id="brain-frontier-copy">Enter your API key and model to connect.</p></div>
+              <div class="brain-mode-note" id="brain-note-private"><h3>Your private GPU</h3><p>Use the inference gateway configured for your entity.</p></div>
+              <div class="brain-mode-note visible" id="brain-note-frontier"><h3 id="brain-provider-title">Provider connection</h3><p id="brain-frontier-copy">Enter your API key and model to connect.</p></div>
               <div class="brain-form-grid">
                 <div class="brain-field brain-hidden" id="brain-key-field">
                   <label for="brain-api-key">API key</label>

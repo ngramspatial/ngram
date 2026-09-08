@@ -16,6 +16,7 @@ from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 import click
+import yaml
 from aiohttp import WSMsgType, ClientSession
 
 from ngram.config import project_configs_dir
@@ -100,8 +101,8 @@ def _ensure_shell_gitignore(shell_dir: Path) -> None:
 def _create_default_shell(shell_dir: Path, entity_name: str) -> None:
     shell_dir.mkdir(parents=True, exist_ok=True)
     (shell_dir / "memory").mkdir(exist_ok=True)
-    shell_yaml = f"""name: {entity_name}
-description: {entity_name}'s spatial body for ngram AR.
+    shell_yaml = f"""name: {json.dumps(entity_name)}
+description: {json.dumps(entity_name + "'s spatial body for ngram AR.")}
 
 model: default
 scale: 0.4
@@ -144,7 +145,7 @@ memory:
     _ensure_shell_gitignore(shell_dir)
 
 
-def configure_shell(shell_dir: Path, *, bridge_url: str, token: str) -> None:
+def configure_shell(shell_dir: Path, *, bridge_url: str, token: str, preserve_worker_settings: bool = False) -> None:
     set_shell_entity_binding(shell_dir / "shell.yaml")
     merge_dotenv_keys(
         shell_dir / ".env",
@@ -154,6 +155,26 @@ def configure_shell(shell_dir: Path, *, bridge_url: str, token: str) -> None:
         },
     )
     _ensure_shell_gitignore(shell_dir)
+    # The app may connect several workers at once; process-global .env credentials
+    # cannot represent those connections. Keep an opaque reference in the body.
+    shell_file = shell_dir / "shell.yaml"
+    data = yaml.safe_load(shell_file.read_text(encoding="utf-8"))
+    options = data.setdefault("binding", {}).setdefault("options", {})
+    connection_id = str(options.get("connectionId") or "")
+    if len(connection_id) != 32 or any(c not in "0123456789abcdef" for c in connection_id):
+        connection_id = secrets.token_hex(16)
+    private_dir = shell_dir.parent.parent / ".runtime" / "connections"
+    private_dir.mkdir(parents=True, exist_ok=True)
+    private_file = private_dir / f"{connection_id}.json"
+    private_file.touch(mode=0o600, exist_ok=True)
+    private_file.write_text(json.dumps({"bridgeUrl": bridge_url, "token": token,
+                                       "useGlobalBrain": not preserve_worker_settings}), encoding="utf-8")
+    try:
+        private_file.chmod(0o600)
+    except OSError:
+        pass
+    options["connectionId"] = connection_id
+    shell_file.write_text(yaml.safe_dump(data, sort_keys=False, allow_unicode=True), encoding="utf-8")
 
 
 def _parse_json_output(output: str) -> Any:

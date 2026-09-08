@@ -18,7 +18,7 @@ the system around an individual.
 
 - **Continuity:** identity, relationships, memory, and body state survive sessions.
 - **Many surfaces:** CLI, Telegram, Discord, HTTP, and AR reach the same Entity.
-- **Replaceable inference:** Ollama is the local-first default; a hosted API can provide both chat and memory embeddings without replacing the Entity runtime.
+- **Replaceable inference:** The recommended cloud setup uses a provider API for chat and memory embeddings, with the persistent Entity on Railway. Local and hybrid inference remain available.
 - **Replaceable bodies:** a shell owns the model, animation, voice, and spatial behavior—not identity.
 - **Portable state:** inspect, verify, export, recover, and move an Entity as an open `.ngram` container.
 - **Bounded agency:** tools and autonomous behavior remain explicit and configurable.
@@ -46,11 +46,12 @@ uv sync --extra dev
 uv run ngram setup
 ```
 
-The setup asks for an Entity name and then offers three clear paths:
+The wizard defaults to **Cloud**: hosted thinking and embeddings, a Railway worker, a dedicated Postgres memory database, and a persistent Linux workspace. It verifies the provider and pairs your AR body.
 
 | Mode | What runs where | Cloudflare required? |
 |---|---|---|
-| **Hosted** (fastest) | Complete Entity runtime locally; only chat and embedding requests use your chosen API | No |
+| **Cloud** (recommended) | API thinking + embeddings; Railway worker, Postgres, and persistent Linux files | No |
+| **Hosted** (advanced) | Complete Entity runtime locally; only chat and embedding requests use your chosen API | No |
 | **Local** | Entity runtime and Ollama both run on this machine | No |
 | **Hybrid** (advanced) | Home inference gateway plus an always-on Railway worker | Yes, when exposing the home gateway publicly |
 
@@ -67,7 +68,9 @@ explicitly select `hybrid` or run `uv run ngram setup --profile hybrid`.
 `ngram` launcher into your active Python environment instead, run
 `python -m pip install --editable .` once.
 
-When setup finishes, use the exact command it prints. For example:
+When cloud setup finishes, open the AR app with the command it prints. **New ngram** guides you through worker pairing, memory settings, body, and voice. Creating another body for the same worker preserves the same identity and memories. Use a separate worker and database for a separate Entity.
+
+For the optional local-runtime profiles:
 
 ```bash
 uv run ngram talk <entity>            # hosted API

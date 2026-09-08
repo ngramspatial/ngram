@@ -680,7 +680,12 @@ async def websocket_handler(request: web.Request) -> web.WebSocketResponse:
                     if isinstance(ready, dict) and ready.get("type") == "event:shell_ready":
                         spatial_context = _update_spatial_context({}, ready)
                         register_body()
-                    await ws.send_str(json.dumps({"type": "session.ready"}))
+                    ready_payload: dict[str, Any] = {"type": "session.ready"}
+                    if shell_slug == "setup-verification":
+                        from ngram.ngram_ar.onboarding import setup_snapshot
+
+                        ready_payload["setup"] = await setup_snapshot(entity)
+                    await ws.send_str(json.dumps(ready_payload))
                     unsubscribe_turn_activity = activity_hub.subscribe(emit_turn_activity)
                     log.info(
                         "ngram_ar_session_start session_id=%s shell=%s",

@@ -2060,30 +2060,25 @@ async function main() {
     }
   });
 
-  // --- Create Shell ---
+  // --- Guided creation ---
+  window.addEventListener('ngram:enter-shell', (event) => {
+    const slug = (event as CustomEvent<string>).detail;
+    if (slug) connection.switchShell(slug);
+  });
   ui.onCreateAgent(async (data) => {
     try {
       const res = await fetch('/api/shells', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
       });
-
+      const result = await res.json();
       if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: 'Unknown error' }));
-        ui.addTranscript('agent', `[Failed to create agent: ${(err as any).error}]`);
-        (window as any).__ngramArResetCreateModal?.();
+        (window as any).__ngramArResetCreateModal?.(null, result.error || 'Could not connect. Please retry.');
         return;
       }
-
-      const result = await res.json() as any;
-      ui.addTranscript('agent', `[Shell "${result.name}" created. Pair it with: ngram ar setup <entity> --shell shells/${result.slug}]`);
-
       addAgentCard({ name: result.name, description: result.description ?? '', slug: result.slug, binding: result.bindingType });
-      (window as any).__ngramArResetCreateModal?.();
-    } catch (err: any) {
-      ui.addTranscript('agent', `[Error creating agent: ${err?.message ?? err}]`);
-      (window as any).__ngramArResetCreateModal?.();
+      (window as any).__ngramArResetCreateModal?.(result);
+    } catch {
+      (window as any).__ngramArResetCreateModal?.(null, 'Could not reach the app server. Check your connection and retry.');
     }
   });
 
