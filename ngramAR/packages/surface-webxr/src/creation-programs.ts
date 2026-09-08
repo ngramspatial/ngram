@@ -163,7 +163,8 @@ export class CreationPrograms {
     )
       throw Error("Programs require 1–256 entity IDs");
     const ids = [...new Set(value.entityIds.map(identifier))];
-    if (ids.some((id) => !this.world.entries.has(id)))
+    const missingEntities = ids.some((id) => !this.world.entries.has(id));
+    if (missingEntities && start)
       throw Error("Create all program entities before installing");
     if (
       JSON.stringify({ params: value.params ?? {}, state: value.state ?? {} })
@@ -201,6 +202,10 @@ export class CreationPrograms {
         300,
       );
     }
+    if (missingEntities) {
+      r.status = 'failed';
+      r.error = 'A program entity was deleted. Restore its objects or update the program scope.';
+    }
     const version = (this.versions.get(id) ?? 0) + 1;
     this.versions.set(id, version);
     // Compile the replacement before disposing the previous version.
@@ -224,6 +229,11 @@ export class CreationPrograms {
   }
   private boot(r) {
     return new Promise((resolve, reject) => {
+      if (r.entityIds.some(id => !this.world.entries.has(id))) {
+        this.fail(r, 'Restore the missing program objects before resuming');
+        reject(Error(r.error));
+        return;
+      }
       const frame = document.createElement("iframe");
       frame.hidden = true;
       frame.setAttribute("sandbox", "allow-scripts");

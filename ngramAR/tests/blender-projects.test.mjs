@@ -11,8 +11,8 @@ test('Blender revisions keep human transforms, defer held objects, and reject st
   const folder = await mkdtemp(join(tmpdir(), 'ngram-blender-links-'));
   let links;
   try {
-    await build({ stdin: { contents: `export {BlenderProjects} from './packages/surface-webxr/src/blender-projects.ts'; export {WorldStore} from './packages/core/src/world-store.ts';`, resolveDir: resolve('.') }, bundle: true, platform: 'node', format: 'esm', outfile: join(folder, 'test.mjs'), logLevel: 'silent' });
-    const { BlenderProjects, WorldStore } = await import(pathToFileURL(join(folder, 'test.mjs')));
+    await build({ stdin: { contents: `export {BlenderProjects} from './packages/surface-webxr/src/blender-projects.ts'; export {CreationPrograms} from './packages/surface-webxr/src/creation-programs.ts'; export {WorldStore} from './packages/core/src/world-store.ts';`, resolveDir: resolve('.') }, bundle: true, platform: 'node', format: 'esm', outfile: join(folder, 'test.mjs'), logLevel: 'silent' });
+    const { BlenderProjects, CreationPrograms, WorldStore } = await import(pathToFileURL(join(folder, 'test.mjs')));
     const entries = new Map();
     const store = new WorldStore({ commit(_before, after) {
       entries.clear();
@@ -41,6 +41,15 @@ test('Blender revisions keep human transforms, defer held objects, and reject st
     store.apply({ requestId: 'remove', operations: [{ op: 'entity.delete', id }] }, 'human');
     links.attach({ ...payload, revision: 4 });
     assert.equal(entries.size, 0, 'A later update cannot undo the human deleting the object');
+    const programs = new CreationPrograms({ entries, store });
+    try {
+      const source = 'return {tick(){}}';
+      await programs.install({ id: 'saved-program', source, entityIds: ['deleted-object'] }, { start: false });
+      assert.equal(programs.inspect()[0].status, 'failed', 'An orphan program must not block scene restoration');
+      assert.equal(programs.export()[0].source, source, 'Keep the user source for repair');
+      await assert.rejects(programs.command('resume', 'saved-program'), /missing program objects/);
+      await assert.rejects(programs.install({ id: 'new-program', source, entityIds: ['missing'] }), /Create all program entities/);
+    } finally { programs.dispose(); }
   } finally {
     clearInterval(links?.timer);
     await rm(folder, { recursive: true, force: true });
