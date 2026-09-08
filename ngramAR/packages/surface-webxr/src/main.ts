@@ -15,6 +15,7 @@ import { mergeVoiceDraft } from './voice-draft.js';
 import { updateContextDisplay } from './context-status.js';
 import { setupContextWheel } from './context-wheel.js';
 import { setupResponseControl } from './response-control.js';
+import { setupWorkStatus } from './work-status.js';
 import type { ContextDisplayState } from './context-status.js';
 import { XRManager } from './xr-manager.js';
 import { setupUI } from './ui.js';
@@ -117,6 +118,7 @@ async function main() {
   const animPanel = new AnimationPanel();
   const behaviorPanel = new BehaviorPanel();
   const agentState = new AgentStateDisplay();
+  const workStatus = setupWorkStatus(document.getElementById("work-status")!, label => agentState.setWorkLabel(label));
   const musicPlayer = new MusicPlayer();
   const youtubePlayer = new YouTubePlayer();
   const terminalViewer = new TerminalViewer();
@@ -731,6 +733,7 @@ async function main() {
   // --- Connection status ---
   connection.onStatusChange((status) => {
     contextWheel.setConnected(status === 'connected');
+    workStatus.setConnected(status === 'connected');
     if (status !== 'connected') {
       visualInspection?.cancel();
       contextDisplay = {};
@@ -949,6 +952,7 @@ async function main() {
         handleAgentState(msg);
         break;
       case 'action:turn_cancelled':
+        workStatus.stopTurns();
         visualInspection?.cancel();
         void creationService.pause();
         if (contextDisplay.compacting) handleContextStatus({ phase: 'stopped' });
@@ -963,6 +967,9 @@ async function main() {
       case 'action:inference_status':
         if (msg.paused) { visualInspection?.cancel(); clearResponsePlayback(); responseControl.reset(); }
         break;
+      case 'action:work_status': workStatus.update(msg as any); break;
+      case 'action:work_status_reset': workStatus.clear(); workStatus.setConnected(true); break;
+      case 'action:work_connection': workStatus.setConnected(msg.connected); break;
       case 'action:context_status':
         handleContextStatus(msg);
         break;
@@ -2000,6 +2007,7 @@ async function main() {
     ui.hideSubtitle();
   }
   function stopResponse(): void {
+    workStatus.stopTurns();
     if (attachments?.isUploading()) attachments.cancelUpload();
     visualInspection?.cancel();
     void creationService.pause();

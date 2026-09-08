@@ -52,6 +52,7 @@ class _TurnActivityHub:
 
     def __init__(self, entity: Entity) -> None:
         self._active: dict[str, dict[str, Any]] = {}
+        self._work: dict[str, dict[str, Any]] = {}
         self._subscribers: dict[
             object,
             tuple[asyncio.Queue[dict[str, Any]], asyncio.Task[None]],
@@ -67,6 +68,12 @@ class _TurnActivityHub:
         elif phase == "finished" and turn_id:
             self._active.pop(turn_id, None)
 
+        if phase == "progress" and turn_id:
+            if (event.get("work") or {}).get("status") == "running":
+                self._work[turn_id] = event
+            else:
+                self._work.pop(turn_id, None)
+
         # Queueing keeps a slow spatial client out of the Entity's serialized
         # model turn while preserving lifecycle ordering for each client.
         for queue, _task in tuple(self._subscribers.values()):
@@ -81,7 +88,8 @@ class _TurnActivityHub:
 
         # This method does not yield: replay is enqueued before any later live
         # event, closing the reconnect race between snapshot and subscription.
-        for activity in self._active.values():
+        queue.put_nowait({"phase": "work_snapshot"})
+        for activity in [*self._active.values(), *self._work.values()]:
             queue.put_nowait(dict(activity))
 
         async def deliver() -> None:
@@ -488,6 +496,7 @@ async def websocket_handler(request: web.Request) -> web.WebSocketResponse:
     await ws.prepare(request)
 
     bridge_session_id: str | None = None
+    work_status_enabled = False
     shell_slug: str = ""
     shell_name: str = ""
     ar_cognition_context_md: str = ""
@@ -613,6 +622,23 @@ async def websocket_handler(request: web.Request) -> web.WebSocketResponse:
             entity._ngram_ar_sessions.register(spatial_session)
 
     async def emit_turn_activity(activity: dict[str, Any]) -> None:
+        if activity.get("phase") in {"progress", "work_snapshot"} and not work_status_enabled:
+            return
+        if activity.get("phase") == "work_snapshot":
+            await send_proactive([{"type": "action:work_status_reset", "sessionId": bridge_session_id or "",
+                                   "timestamp": int(time.time() * 1000)}])
+            return
+        if activity.get("phase") == "progress":
+            configured_person = os.environ.get("NGRAM_AR_PERSON_ID", "").strip()
+            if configured_person and configured_person != "ar_user" and activity.get("person_id") != configured_person:
+                return
+            if activity.get("platform") in {"autonomous", "automation", "delegation"}:
+                return
+            await send_proactive([{
+                "type": "action:work_status", **activity["work"],
+                "sessionId": bridge_session_id or "",
+            }])
+            return
         actions = _external_message_activity_actions(
             activity,
             bridge_session_id or "",
@@ -657,6 +683,7 @@ async def websocket_handler(request: web.Request) -> web.WebSocketResponse:
                     await ws.send_str(json.dumps({"type": "pong"}))
                     continue
                 if mtype == "session.start":
+                    work_status_enabled = data.get("workStatus") is True
                     if spatial_session is not None:
                         entity._ngram_ar_sessions.unregister(spatial_session)
                         spatial_session = None
@@ -1079,6 +1106,9 @@ async def _handle_shell_event(
 
 async def create_bridge_app(entity: Entity) -> web.Application:
     app = web.Application()
+    start_code_tasks = getattr(entity, "start_code_tasks", None)
+    if start_code_tasks is not None:
+        start_code_tasks()
     if not isinstance(getattr(entity, "_ngram_ar_sessions", None), SpatialSessions):
         entity._ngram_ar_sessions = SpatialSessions()
     activity_hub = _TurnActivityHub(entity)
@@ -1095,6 +1125,8 @@ async def create_bridge_app(entity: Entity) -> web.Application:
     register_blender_routes(app, _check_token)
     from ngram.ngram_ar.attachment_routes import register_attachment_routes
     register_attachment_routes(app, _check_token)
+    from ngram.ngram_ar.code_task_routes import register_code_task_routes
+    register_code_task_routes(app, _check_token)
     app.router.add_get("/", websocket_handler)
     return app
 

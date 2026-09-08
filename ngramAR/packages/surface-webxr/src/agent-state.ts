@@ -57,6 +57,9 @@ export class AgentStateDisplay {
   private state: VisualAgentState = 'idle';
   private toolName = '';
   private message = '';
+  private workLabel = '';
+
+  setWorkLabel(label: string): void { this.workLabel = label; }
   private elapsed = 0;
   private lastFrame = -1;
   private attached = false;
@@ -329,6 +332,7 @@ export class AgentStateDisplay {
 
     const textX = spinnerCx + spinnerR + 14;
     const maxTextW = w - textX - 16;
+    if (this.workLabel) label = this.workLabel;
     let displayText = label;
     if (ctx.measureText(displayText).width > maxTextW) {
       while (displayText.length > 0 && ctx.measureText(displayText + '…').width > maxTextW) {

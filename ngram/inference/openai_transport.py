@@ -4,12 +4,18 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from typing import Any, AsyncIterator, Optional
+import uuid
 
 import aiohttp
+import structlog
 
 from ngram.cognition import gemma
 from ngram.inference.types import ChatCompletionResult, ToolCallSpec
+from ngram.work_activity import current_work, work_progress, work_step
+
+log = structlog.get_logger(__name__)
 
 
 class OpenAICompatibleTransport:
@@ -65,11 +71,37 @@ class OpenAICompatibleTransport:
         await asyncio.sleep(0)
 
     async def _post_json(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+        if path not in {"/chat/completions", "/responses"}:
+            return await self._post_json_attempts(path, payload)
+        request_id = uuid.uuid4().hex
+        started = time.monotonic()
+        activity = current_work.get()
+        fields = {"request_id": request_id, "run_id": activity.run_id if activity else None,
+                  "timeout_s": self.timeout.total, "max_attempts": self.retry_attempts}
+        log.info("inference_request_started", **fields)
+        try:
+            async with work_step("model_wait", requestId=request_id, attempt=1,
+                                 maxAttempts=self.retry_attempts, timeoutMs=(self.timeout.total or 0) * 1000):
+                result = await self._post_json_attempts(path, payload, request_id=request_id)
+            log.info("inference_request_completed", **fields, duration_s=round(time.monotonic() - started, 2))
+            return result
+        except asyncio.CancelledError:
+            log.info("inference_request_cancelled", **fields, duration_s=round(time.monotonic() - started, 2))
+            raise
+        except Exception as exc:
+            # Provider response bodies can contain user data. Log types, never payloads.
+            log.warning("inference_request_failed", **fields, error_type=type(exc).__name__,
+                        duration_s=round(time.monotonic() - started, 2))
+            raise
+
+    async def _post_json_attempts(self, path: str, payload: dict[str, Any], *, request_id: str = "") -> dict[str, Any]:
         session = await self._session_get()
         url = f"{self.api}{path}"
         last_err: Exception | None = None
         for attempt in range(self.retry_attempts):
             try:
+                if request_id and attempt:
+                    await work_progress("model_wait", attempt=attempt + 1, retryDelayMs=0)
                 async with session.post(url, json=payload) as resp:
                     text = await resp.text()
                     if resp.status >= 400:
@@ -83,7 +115,13 @@ class OpenAICompatibleTransport:
             except (aiohttp.ClientError, asyncio.TimeoutError) as e:
                 last_err = e
                 if attempt + 1 < self.retry_attempts:
-                    await asyncio.sleep(self.retry_delay * (2**attempt))
+                    delay = self.retry_delay * (2**attempt)
+                    if request_id:
+                        log.warning("inference_request_retry", request_id=request_id, attempt=attempt + 1,
+                                    next_attempt=attempt + 2, delay_s=delay, error_type=type(e).__name__)
+                        await work_progress("retry_wait", attempt=attempt + 1, retryDelayMs=delay * 1000,
+                                            errorType=type(e).__name__)
+                    await asyncio.sleep(delay)
         raise last_err or RuntimeError("request failed")
 
     async def _get_json(self, path: str) -> dict[str, Any]:

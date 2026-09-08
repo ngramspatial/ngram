@@ -80,6 +80,35 @@ export interface SetAgentStateAction extends ProtocolMessage {
     tool?: AgentToolInfo;
     message?: string;
 }
+/** Observed execution telemetry; never contains model reasoning or tool arguments. */
+export interface WorkStatusAction extends ProtocolMessage {
+    type: "action:work_status";
+    runId: string;
+    instanceId: string;
+    scope: "turn" | "code_task";
+    status: "running" | "complete" | "failed" | "cancelled" | "paused" | "blocked";
+    stage: "preparing" | "processing" | "model_wait" | "retry_wait" | "tool_running" | "rendering";
+    sequence: number;
+    elapsedMs: number;
+    stageElapsedMs: number;
+    idleMs: number;
+    heartbeat?: boolean;
+    requestId?: string;
+    attempt?: number;
+    maxAttempts?: number;
+    timeoutMs?: number;
+    retryDelayMs?: number;
+    errorType?: string;
+    tool?: string;
+    operation?: string;
+    project?: string;
+    revision?: number;
+    taskId?: string;
+    phase?: number;
+    mode?: string;
+}
+export interface WorkStatusResetAction extends ProtocolMessage { type: "action:work_status_reset"; }
+export interface WorkConnectionAction extends ProtocolMessage { type: "action:work_connection"; connected: boolean; }
 export interface SpeakStreamStartAction extends ProtocolMessage {
     type: "action:speak_stream_start";
     streamId: string;
@@ -303,7 +332,7 @@ export interface TerminalOutputAction extends ProtocolMessage {
     /** If true, clear all previous terminal content */
     clear?: boolean;
 }
-export type SpatialAction = WorldAction | InferenceStatusAction | ContextStatusAction | TurnCancelledAction | SpeakAction | EmoteAction | MoveToAction | LookAtAction | GestureAction | ShowPanelAction | HidePanelAction | SetModeAction | FollowAction | HighlightAction | GoIdleAction | SpawnAction | SetAgentStateAction | SpeakStreamStartAction | SpeakStreamDeltaAction | SpeakStreamEndAction | SpawnObjectAction | SpawnTextAction | SpawnImageAction | SpawnToyAction | RemoveObjectAction | ClearObjectsAction | DrawLineAction | DrawArrowAction | DrawAnnotationAction | ClearDrawingsAction | SetEnvironmentAction | SetLightingAction | SpawnParticlesAction | ClearEnvironmentAction | PlayAudioAction | StopAudioAction | PauseAudioAction | SetAudioVolumeAction | PlayYouTubeAction | ControlYouTubeAction | TerminalOutputAction | SpawnModelAction | UpdateAppPanelAction | SetBackgroundAction | OpenBrowserAction | ControlBrowserAction | GenerateMotionAction | PlayMotionClipAction | ErrorAction | RequestCaptureAction;
+export type SpatialAction = WorkStatusAction | WorkStatusResetAction | WorkConnectionAction | WorldAction | InferenceStatusAction | ContextStatusAction | TurnCancelledAction | SpeakAction | EmoteAction | MoveToAction | LookAtAction | GestureAction | ShowPanelAction | HidePanelAction | SetModeAction | FollowAction | HighlightAction | GoIdleAction | SpawnAction | SetAgentStateAction | SpeakStreamStartAction | SpeakStreamDeltaAction | SpeakStreamEndAction | SpawnObjectAction | SpawnTextAction | SpawnImageAction | SpawnToyAction | RemoveObjectAction | ClearObjectsAction | DrawLineAction | DrawArrowAction | DrawAnnotationAction | ClearDrawingsAction | SetEnvironmentAction | SetLightingAction | SpawnParticlesAction | ClearEnvironmentAction | PlayAudioAction | StopAudioAction | PauseAudioAction | SetAudioVolumeAction | PlayYouTubeAction | ControlYouTubeAction | TerminalOutputAction | SpawnModelAction | UpdateAppPanelAction | SetBackgroundAction | OpenBrowserAction | ControlBrowserAction | GenerateMotionAction | PlayMotionClipAction | ErrorAction | RequestCaptureAction;
 export interface SpatialContextSnapshot {
     version: "1.0";
     observedAt: number;

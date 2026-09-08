@@ -58,7 +58,8 @@ async def test_entity_emits_turn_activity_start_and_finish_even_on_failure(tmp_p
     events: list[dict[str, object]] = []
 
     async def sink(event: dict[str, object]) -> None:
-        events.append(event)
+        if event["phase"] != "progress":
+            events.append(event)
 
     async def failing_perceive_once(
         self: Entity, inp: Input, **_kwargs
@@ -95,7 +96,8 @@ async def test_entity_can_defer_activity_finish_through_reply_delivery(tmp_path)
     events: list[dict[str, object]] = []
 
     async def sink(event: dict[str, object]) -> None:
-        events.append(event)
+        if event["phase"] != "progress":
+            events.append(event)
 
     async def fake_perceive_once(
         self: Entity, _inp: Input, **_kwargs
@@ -133,7 +135,8 @@ async def test_entity_labels_non_message_spatial_cognition(tmp_path) -> None:
     events: list[dict[str, object]] = []
 
     async def sink(event: dict[str, object]) -> None:
-        events.append(event)
+        if event["phase"] != "progress":
+            events.append(event)
 
     async def fake_perceive_once(
         self: Entity, _inp: Input, **_kwargs
@@ -227,11 +230,13 @@ async def test_stale_activity_sink_is_bounded_evicted_and_cannot_block_turn(
             await release_stale_cleanup.wait()
 
     async def broken_sink(event: dict[str, object]) -> None:
-        broken_phases.append(str(event["phase"]))
+        if event["phase"] != "progress":
+            broken_phases.append(str(event["phase"]))
         raise RuntimeError("closed surface")
 
     async def healthy_sink(event: dict[str, object]) -> None:
-        healthy_phases.append(str(event["phase"]))
+        if event["phase"] != "progress":
+            healthy_phases.append(str(event["phase"]))
 
     async def fake_perceive_once(
         self: Entity, _inp: Input, **_kwargs

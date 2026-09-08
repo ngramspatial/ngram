@@ -49,8 +49,22 @@ async def ar_blender(command: str, payload: dict[str, Any] | None = None) -> str
         last_revision = revision
         last_state = snapshot.get("state")
 
+    from ngram.work_activity import safe_label, work_progress
+
+    last_observed = None
+
+    async def report_blender(result):
+        nonlocal last_observed
+        # A successful status poll is connectivity, not new Blender progress.
+        snapshot = result.get("snapshot") or {}
+        observed = (result.get("state"), snapshot.get("revision"), result.get("updated"), len(result.get("renders") or []))
+        if observed != last_observed:
+            last_observed = observed
+            await work_progress(project=safe_label(project or ""), revision=snapshot.get("revision"))
+
     try:
         result = await client.call("blender", args)
+        await report_blender(result)
         project = result.get("project_id") or project
         if project and command in {"execute", "publish", "show", "stop", "status"}:
             await show(result)
@@ -58,6 +72,7 @@ async def ar_blender(command: str, payload: dict[str, Any] | None = None) -> str
         while result.get("ok") and result.get("state") == "working" and command in {"execute", "publish", "render"}:
             await asyncio.sleep(0.5)
             result = await client.call("blender", {"command": "status", "project_id": project})
+            await report_blender(result)
             if not result.get("ok"):
                 break
             if result.get("job_id") != args["request_id"]:

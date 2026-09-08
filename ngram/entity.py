@@ -583,6 +583,9 @@ class Entity:
 
     def set_inference_paused(self, paused: bool) -> None:
         self.inference_control.set_paused(paused)
+        code_tasks = getattr(self, "_code_task_manager", None)
+        if paused and code_tasks is not None:
+            code_tasks.pause_active()
         if paused and self._active_perception is not None:
             self._active_perception.cancel()
 
@@ -604,11 +607,13 @@ class Entity:
 
         return unregister
 
-    async def _emit_turn_activity(self, phase: str, inp: Input) -> None:
+    async def _emit_turn_activity(self, phase: str, inp: Input, *, work: dict[str, Any] | None = None) -> None:
         turn_id = str(getattr(inp, "_ngram_turn_activity_id", "") or "")
         if phase == "started":
             turn_id = os.urandom(8).hex()
             setattr(inp, "_ngram_turn_activity_id", turn_id)
+        elif work is not None:
+            turn_id = work["runId"]
         elif not turn_id:
             # A deferred finish may run after cancellation while the turn was
             # still waiting for the serialization lock and never started.
@@ -634,6 +639,8 @@ class Entity:
             "person_name": str(inp.person_name or ""),
             "timestamp": int(time.time() * 1000),
         }
+        if work is not None:
+            event["work"] = work
         sinks = tuple(getattr(self, "_turn_activity_sinks", ()))
         if sinks:
             async def deliver(
@@ -1231,6 +1238,9 @@ class Entity:
             self.tools.register_decorated(delegation_tools.delegate_task)
         if self._tool_enabled("code_task", True):
             self.tools.register_decorated(code_task_tools.code_task_session)
+            self.tools.register_decorated(code_task_tools.code_task_status)
+            self.tools.register_decorated(code_task_tools.code_task_resume)
+            self.tools.register_decorated(code_task_tools.code_task_cancel)
         self.tools.register_decorated(web_tools.search_web)
         self.tools.register_decorated(web_tools.fetch_url)
         self.tools.register_decorated(read_file)
@@ -1346,6 +1356,14 @@ class Entity:
             return
         await self.refresh_mcp_servers()
         self._presence_tools_bootstrapped = True
+        self.start_code_tasks()
+
+    def start_code_tasks(self) -> None:
+        # The bridge may be constructed before a facade has its tool registry.
+        if not hasattr(self, "tools"):
+            return
+        if self._tool_enabled("code_task", True):
+            code_task_tools.manager_for(self).start()
 
     @staticmethod
     def _message_content_str(content: Any) -> str:
@@ -1836,7 +1854,12 @@ class Entity:
             )
         )
         try:
-            out = await self.tools.execute(spec)
+            from ngram.work_activity import safe_label, work_step
+
+            operation = safe_label(spec.arguments.get("command", "")) if spec.name == "ar_blender" else ""
+            stage = "rendering" if spec.name == "ar_blender" and operation == "render" else "tool_running"
+            async with work_step(stage, tool=safe_label(spec.name), operation=operation):
+                out = await self.tools.execute(spec)
         finally:
             reset_tool_runtime(tok)
         parsed = None
@@ -2500,9 +2523,17 @@ class Entity:
             if self.inference_paused:
                 return "Inference is paused. Resume inference to continue.", False
             await self._emit_turn_activity("started", inp)
+            from ngram.work_activity import work_scope
+
+            async def report_work(status: dict[str, Any]) -> None:
+                await self._emit_turn_activity("progress", inp, work=status)
+
+            async def observed_perception(**kwargs):
+                async with work_scope(report_work):
+                    return await self._perceive_once(inp, **kwargs)
+
             try:
-                self._active_perception = asyncio.create_task(self._perceive_once(
-                    inp,
+                self._active_perception = asyncio.create_task(observed_perception(
                     stream=stream,
                     record_user_message=record_user_message,
                     meaningful_override=meaningful_override,
@@ -3869,6 +3900,9 @@ class Entity:
             await mount.checkpoint(event_type, event_payload)
 
     async def shutdown(self) -> None:
+        code_tasks = getattr(self, "_code_task_manager", None)
+        if code_tasks is not None:
+            await code_tasks.shutdown()
         try:
             self.tonic.save_state()
         except Exception:

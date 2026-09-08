@@ -102,6 +102,7 @@ export class EntityBridgeBinding {
         });
         const startPayload = {
             type: "session.start",
+            workStatus: true,
             sessionId: this.arSessionId,
             systemPrompt: this.systemPrompt,
             shellName: this.shellName,
@@ -188,7 +189,7 @@ export class EntityBridgeBinding {
         // cannot remain stuck merely because `started` was not set yet.
         if (!this.stopping && this.proactive) {
             try {
-                this.proactive([{
+                this.proactive([{ type: "action:work_connection", connected: false, sessionId: this.arSessionId, timestamp: Date.now() }, {
                         type: "action:set_agent_state",
                         state: "idle",
                         sessionId: this.arSessionId,

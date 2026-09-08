@@ -237,7 +237,13 @@ def format_tool_activity(tool_name: str, args: dict[str, Any]) -> str | None:
     if tool_name == "delegate_task":
         return "🪄 delegating a sub-task..."
     if tool_name == "code_task_session":
-        return "🧩 multi-phase code task..."
+        return "🧩 starting a coding goal..."
+    if tool_name == "code_task_status":
+        return "checking coding goal progress..."
+    if tool_name == "code_task_resume":
+        return "resuming the coding goal..."
+    if tool_name == "code_task_cancel":
+        return "cancelling the coding goal..."
     if tool_name == "get_ha_state":
         return f"🔌 checking state of {args.get('entity_id', 'device')}..."
     if tool_name == "set_ha_state":
@@ -293,11 +299,11 @@ class ToolFn:
                 continue
             ann = p.annotation if p.annotation != inspect.Parameter.empty else str
             json_type = "string"
-            if ann is int:
+            if ann in (int, "int"):
                 json_type = "integer"
-            elif ann is float:
+            elif ann in (float, "float"):
                 json_type = "number"
-            elif ann is bool:
+            elif ann in (bool, "bool"):
                 json_type = "boolean"
             props[pname] = {"type": json_type}
             if p.default == inspect.Parameter.empty:

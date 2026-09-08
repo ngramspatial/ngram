@@ -11,6 +11,7 @@ import structlog
 from ngram.config import EntityConfig
 from ngram.cognition import gemma
 from ngram.cognition.context_status import report_context_status
+from ngram.inference.control import InferencePausedError
 from ngram.cognition.history_compression import (
     estimate_context_tokens,
     find_compaction_boundaries,
@@ -359,7 +360,8 @@ class DeliberateCognition:
                 step_cap = max(3, min(max(25, self._agent_step_cap()), cap))
             elif meta.get("code_task"):
                 cap = int(meta.get("code_task_max_steps") or 14)
-                step_cap = max(5, min(max(25, self._agent_step_cap()), cap))
+                # Coding goals own their phase budgets independently of chat.
+                step_cap = max(5, min(10000, cap))
             ss = meta.get("sustained_session")
             if isinstance(ss, dict):
                 extra = int(ss.get("extra_tool_steps", 0) or 0)
@@ -430,6 +432,9 @@ class DeliberateCognition:
                 for tc in res.tool_calls:
                     try:
                         out = await tool_executor(tc)
+                    except InferencePausedError:
+                        # Pause is a control signal, not a recoverable tool error.
+                        raise
                     except Exception as e:
                         out = json.dumps({"error": str(e)})
                     tool_failed = tool_failed or _tool_content_failed(out)
