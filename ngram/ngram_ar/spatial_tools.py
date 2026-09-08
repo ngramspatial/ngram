@@ -10,6 +10,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from ngram.ngram_ar.spatial_sessions import SpatialSessions, connected_spatial_session
+from ngram.ngram_ar.figment_tools import FIGMENT_TOOLS, register_figment_tools
 from ngram.presence.tools.registry import ToolRegistry
 from ngram.presence.tools.runtime import get_tool_runtime
 
@@ -61,6 +62,7 @@ _SCENE_OBJECT_SHAPES = frozenset({"cube", "sphere", "cylinder", "cone", "torus",
 _TOY_TYPES = frozenset({"ball", "bouncy_ball", "beach_ball", "dice", "marble"})
 _MOTION_ROOT_TARGETS = frozenset({"stationary", "user", "forward", "left", "right"})
 _SPATIAL_CAPABILITIES = (
+    *FIGMENT_TOOLS,
     "ar_blender",
     "ar_world",
     "ar_inspect_surface",
@@ -791,6 +793,7 @@ async def _ar_world(command: str, payload: dict[str, Any] | None = None) -> str:
 def register_ngram_ar_spatial_tools(registry: ToolRegistry) -> None:
     from ngram.ngram_ar.blender_tools import register_blender_tools
     register_blender_tools(registry)
+    register_figment_tools(registry)
     registry.register_fn(
         "ar_world",
         "Create, inspect, edit and PROGRAM persistent spatial creations. Call command=capabilities first for the exact contract and JavaScript API. "

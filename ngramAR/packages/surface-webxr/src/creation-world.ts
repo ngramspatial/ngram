@@ -1,7 +1,9 @@
 // @ts-nocheck
 import * as THREE from "three";
 import { WorldStore } from "@ngram-ar/core";
-import { getWorld, getRapier } from "./physics-world.js";
+import { getWorld, getRapier, onPhysicsCollision, getGroundCollider } from "./physics-world.js";
+import { colliderDescriptor, collisionDetail } from "./figment-physics.js";
+import { resolveFigmentAnchors } from "./figment-anchors.js";
 import { loadCreationAsset, disposeCreationAsset } from "./creation-assets.js";
 
 const vec = (a) => ({ x: a[0], y: a[1], z: a[2] });
@@ -17,8 +19,6 @@ export class CreationWorld {
   store: WorldStore;
   paused = false;
   metrics = { frames: 0, frameTimeMs: 0, physicsBodies: 0, instances: 0 };
-  private contacts = new Set();
-  private contactClock = 0;
   constructor(scene) {
     this.root.name = "ngram-creations";
     scene.add(this.root);
@@ -26,6 +26,7 @@ export class CreationWorld {
       commit: (before, after, effects) => this.commit(before, after, effects),
       sample: (e) => this.sample(e.id),
     });
+    this.unsubscribePhysics = onPhysicsCollision((a, b, started) => this.collision(a, b, started));
   }
   private geometry(g) {
     const [x, y, z] = g.size;
@@ -277,11 +278,28 @@ export class CreationWorld {
     desc
       .setTranslation(...e.transform.position)
       .setRotation(quaternion(e.transform.rotation))
-      .setLinearDamping(p.damping)
-      .setAngularDamping(p.damping)
+      .setLinearDamping(p.linearDamping)
+      .setAngularDamping(p.angularDamping)
       .setCcdEnabled(true);
     const body = world.createRigidBody(desc);
     entry.body = body;
+    body.setEnabledTranslations(...p.translations, true);
+    body.setEnabledRotations(...p.rotations, true);
+    entry.colliders = [];
+    if (p.colliders.length) {
+      const solids = p.colliders.filter(c => !c.sensor).length;
+      for (const c of p.colliders) {
+        const descriptor = colliderDescriptor(R, c, e.transform.scale)
+          .setMass(c.sensor ? 0 : p.mass / solids)
+          .setRestitution(p.restitution).setFriction(p.friction);
+        entry.colliders.push({ collider: world.createCollider(descriptor, body), id: c.id });
+      }
+      // Sensor-only bodies still have adjustable mass and respond to impulses.
+      if (!solids) body.setAdditionalMass(p.mass, true);
+      entry.collider = entry.colliders[0].collider;
+      if (this.paused) body.setEnabled(false);
+      return;
+    }
     const [x, y, z] = e.geometry.size.map((n, i) => n * e.transform.scale[i]);
     // Elliptical curved primitives use a convex hull so collider and visible scale agree.
     let colliderDesc;
@@ -303,10 +321,12 @@ export class CreationWorld {
     }
     colliderDesc
       .setMass(p.mass)
+      .setActiveEvents(R.ActiveEvents.COLLISION_EVENTS)
       .setRestitution(p.restitution)
       .setFriction(p.friction);
     entry.body = body;
     entry.collider = world.createCollider(colliderDesc, body);
+    entry.colliders = [{ collider: entry.collider, id: "body" }];
     if (this.paused) body.setEnabled(false);
   }
   private removeEntry(id) {
@@ -532,15 +552,30 @@ export class CreationWorld {
             : null;
         const velocity = entry?.body?.linvel(),
           angularVelocity = entry?.body?.angvel();
+        const retained = e.asset && entry?.status === "ready" && !changedAssets.has(e.id)
+          ? { visual: entry.visual, mixer: entry.mixer } : null;
+        if (retained) {
+          retained.visual.removeFromParent();
+          entry.mixer = null;
+        }
         this.removeEntry(e.id);
         entry = staged.get(e.id);
         this.entries.set(e.id, entry);
         if (live) this.setPose(e.id, live);
         if (entry.body && velocity) {
-          entry.body.setLinvel(velocity, true);
-          entry.body.setAngvel(angularVelocity, true);
+          entry.body.setLinvel(vec([velocity.x, velocity.y, velocity.z].map((n, i) => e.physics.translations[i] ? n : 0)), true);
+          entry.body.setAngvel(vec([angularVelocity.x, angularVelocity.y, angularVelocity.z].map((n, i) => e.physics.rotations[i] ? n : 0)), true);
         }
-        if (e.asset) this.startAsset(entry);
+        if (retained) {
+          disposeCreationAsset(entry.visual);
+          entry.visual?.removeFromParent();
+          entry.visual = retained.visual;
+          entry.mixer = retained.mixer;
+          entry.node.add(retained.visual);
+          entry.status = "ready";
+          entry.progress = 1;
+          if (!e.asset.preserveMaterials) this.applyMaterial(entry);
+        } else if (e.asset) this.startAsset(entry);
       } else {
         this.updateEntry(entry, e);
         // Keep the previous visible mesh and live placement until the newest
@@ -597,9 +632,12 @@ export class CreationWorld {
       status: entry.status,
       error: entry.error,
       progress: entry.progress,
+      ...(entry.spec.figment ? { anchors: resolveFigmentAnchors(this, id) } : {}),
       ...(entry.body
         ? {
             velocity: Object.values(entry.body.linvel()),
+            angularVelocity: Object.values(entry.body.angvel()),
+            mass: entry.body.mass(),
             sleeping: entry.body.isSleeping(),
           }
         : {}),
@@ -656,7 +694,7 @@ export class CreationWorld {
       entry.body.setTranslation(vec(transform.position), true);
       entry.body.setRotation(entry.node.quaternion, true);
       entry.body.setLinvel(
-        vec(velocity.map((n) => THREE.MathUtils.clamp(n, -8, 8))),
+        vec(velocity.map((n, i) => entry.spec.physics.translations[i] ? THREE.MathUtils.clamp(n, -8, 8) : 0)),
         true,
       );
     }
@@ -672,7 +710,11 @@ export class CreationWorld {
   activate(id, fraction = 0.5, actor = "human") {
     const entry = this.entries.get(id),
       c = entry?.spec.control;
-    if (!c) return;
+    if (!c) {
+      const action = Object.keys(entry?.spec.figment?.actions ?? {})[0];
+      if (action) this.store.emit("action", actor, id, { action });
+      return;
+    }
     const value =
       c.type === "toggle"
         ? c.value > c.min
@@ -739,32 +781,27 @@ export class CreationWorld {
         e.node.quaternion.set(q.x, q.y, q.z, q.w);
       }
     }
-    this.contactClock += dt;
-    if (this.paused || this.contactClock < 0.1) return;
-    this.contactClock = 0;
-    const colliders = new Map(
-      [...this.entries]
-        .filter(([, e]) => e.collider)
-        .map(([id, e]) => [e.collider.handle, id]),
-    );
-    const contacts = new Set();
-    for (const [id, e] of this.entries)
-      if (e.collider)
-        getWorld().contactPairsWith(e.collider, (other) => {
-          const target = colliders.get(other.handle);
-          if (!target || target === id) return;
-          let touching = false;
-          getWorld().contactPair(e.collider, other, (manifold) => {
-            if (manifold.numSolverContacts() > 0) touching = true;
-          });
-          if (!touching) return;
-          const pair = [id, target].sort().join("|");
-          contacts.add(pair);
-          if (!this.contacts.has(pair)) {
-            this.contacts.add(pair);
-            this.store.emit("collision", "physics", id, { other: target });
-          }
-        });
-    this.contacts = contacts;
+  }
+  private collision(aHandle, bHandle, started) {
+    if (this.paused) return;
+    const find = handle => {
+      for (const [id, e] of this.entries) {
+        const c = e.colliders?.find(c => c.collider.handle === handle);
+        if (c) return { id, collider: c.collider, idInBody: c.id };
+      }
+      const collider = getWorld().getCollider(handle);
+      return { id: handle === getGroundCollider()?.handle ? "ground" : null, collider, idInBody: null };
+    };
+    const a = find(aHandle), b = find(bHandle);
+    if (!a.collider || !b.collider) return;
+    const sensor = a.collider.isSensor() || b.collider.isSensor();
+    const detail = started && !sensor ? collisionDetail(getWorld(), a.collider, b.collider) : {};
+    for (const [own, other, flipped] of [[a, b, false], [b, a, true]]) {
+      if (!this.entries.has(own.id)) continue;
+      this.store.emit(sensor ? (started ? "sensor.enter" : "sensor.exit") : (started ? "collision" : "collision.end"), "physics", own.id, {
+        ...detail, normal: detail.normal?.map(n => flipped ? -n : n) ?? null,
+        other: other.id, collider: own.idInBody ?? own.id, otherCollider: other.idInBody ?? other.id,
+      });
+    }
   }
 }

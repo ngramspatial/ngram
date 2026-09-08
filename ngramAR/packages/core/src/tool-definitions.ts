@@ -1,9 +1,11 @@
 // @ts-nocheck
+import { FIGMENT_TOOL_DEFINITIONS } from "./figment-tools.js";
 // ─── Spatial Tool Definitions ────────────────────────────────────────────────
 // Single source of truth for spatial tools. Bindings auto-generate their
 // provider-specific schemas (OpenAI function calling, Anthropic tool blocks)
 // from these definitions. Add a new tool here → every binding gets it.
 export const SPATIAL_TOOL_DEFINITIONS = [
+    ...FIGMENT_TOOL_DEFINITIONS,
     {
         name: "world",
         description: "Inspect, build and program persistent spatial creations. Start with capabilities for the exact world and JavaScript API. observe returns live objects; apply commits batched geometry/material/physics/joint edits; program installs local tick/event handlers; events polls human interactions. Programs run locally without model calls. Do not repeatedly poll to watch a creation: finish the turn after building it.",

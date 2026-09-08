@@ -1,0 +1,42 @@
+[
+  {
+    "name": "ar_world",
+    "arguments": {
+      "command": "apply",
+      "payload": {
+        "requestId": "create-pocket-lantern",
+        "operations": [{
+          "op": "entity.create",
+          "entity": {
+            "id": "lantern",
+            "name": "Pocket lantern",
+            "geometry": { "shape": "sphere", "size": [0.2, 0.2, 0.2] },
+            "transform": { "position": [0, 1.2, -1] },
+            "material": { "color": "#FFFFFF", "roughness": 0.2 }
+          }
+        }]
+      }
+    }
+  },
+  {
+    "name": "ar_figment",
+    "arguments": {
+      "command": "attach",
+      "payload": {
+        "id": "lantern",
+        "preset": "lantern",
+        "definition": {
+          "title": "Pocket lantern",
+          "version": "1.0.0",
+          "anchors": { "handle": { "position": [0, 0.1, 0] } },
+          "grips": { "hold": { "anchor": "handle", "twoHand": "aim" } }
+        },
+        "physics": { "mode": "dynamic", "mass": 0.6, "gravity": [0, 0, 0], "restitution": 0.2 }
+      }
+    }
+  },
+  {
+    "name": "ar_figment_behavior",
+    "arguments": { "command": "behavior", "payload": { "id": "lantern", "action": "resume" } }
+  }
+]

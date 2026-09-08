@@ -1,9 +1,9 @@
 // @ts-nocheck
-import { WORLD_LIMITS, identifier, number } from "@ngram-ar/core";
+import { WORLD_LIMITS, identifier, number, propertyValue } from "@ngram-ar/core";
 
 // Runs inside a dedicated Worker inside an opaque-origin iframe. The iframe's
 // CSP is inherited by its blob Worker: no network, imports, nested workers or DOM.
-function workerBootstrap() {
+export function workerBootstrap() {
   let handlers = {},
     state = {},
     params = {},
@@ -11,6 +11,11 @@ function workerBootstrap() {
     time = 0,
     dt = 0,
     operations = [];
+  const partId = name => name === "self" || name === undefined ? params.__figment?.root : params.__figment?.parts?.[name];
+  const emit = op => {
+    if (operations.length >= 128) throw Error("Program command budget exceeded");
+    operations.push(op);
+  };
   const send = self.postMessage.bind(self);
   for (const key of ["Worker", "SharedWorker", "importScripts", "postMessage"])
     Object.defineProperty(self, key, {
@@ -32,6 +37,19 @@ function workerBootstrap() {
       return dt;
     },
     get: (id) => entities.find((e) => e.id === id) ?? null,
+    get self() { return entities.find(e => e.id === partId("self")) ?? null; },
+    part: name => entities.find(e => e.id === partId(name)) ?? null,
+    anchor: name => entities.find(e => e.id === partId("self"))?.anchors?.[name] ?? null,
+    property: name => entities.find(e => e.id === partId("self"))?.figment?.properties?.[name]?.value,
+    setProperty: (name, value) => {
+      emit({ op: "figment.property", id: partId("self"), name, value });
+      const property = entities.find(e => e.id === partId("self"))?.figment?.properties?.[name];
+      if (property) property.value = value;
+    },
+    patch: (part, patch) => emit({ op: "entity.patch", id: partId(part), patch }),
+    impulse: (part, impulse, torque) => emit({ op: "body.impulse", id: partId(part), impulse, ...(torque ? { torque } : {}) }),
+    motor: (name, velocity, strength) => emit({ op: "joint.motor", id: params.__figment?.joints?.[name], velocity, ...(strength === undefined ? {} : { strength }) }),
+    signal: (name, data = {}) => emit({ op: "figment.signal", id: partId("self"), name, data }),
     emit: (ops) => {
       if (!Array.isArray(ops) || operations.length + ops.length > 128)
         throw Error("Program command budget exceeded");
@@ -95,9 +113,9 @@ export const PROGRAM_API_HELP = {
     "{id,name?,source,entityIds:[...],params:{...},state:{...},hz?:1..30}. Source is JavaScript returning {tick(){...},event(event){...}}. No imports, DOM or network. Runs locally without model requests.",
   api: "api.time (simulation seconds), api.dt (seconds), api.params, api.state (mutable JSON persisted at checkpoints), api.get(id) (live entity snapshot including heldBy), api.emit([world operations]). Skip held entities when animating.",
   permissions:
-    "Only listed entity IDs and joints entirely within that list may be patched, motorized or receive impulses. Programs may animate geometry vertices/instances, transforms, materials and controls within world budgets. Programs cannot create/delete objects or install programs. Create geometry through world.apply, then animate it locally. Human grabs take priority.",
+    "Only listed entity IDs and joints entirely within that list may be patched, motorized or receive impulses. Programs may animate geometry vertices/instances, transforms, materials, controls and physics within world budgets. Programs cannot create/delete objects or install programs. Human grabs own physical pose/geometry; material/control/visibility and typed Figment properties can still respond while held.",
   events:
-    "grab, release, control {value}, collision {other}, world.edited. Events have sequence, time, type, actor, target, data. Only events targeting owned entities are delivered.",
+    "grab, grip, release, control {value}, action {action,data}, property {name,value}, collision {other,collider,otherCollider,point,normal,impulse,relativeSpeed}, collision.end, sensor.enter, sensor.exit, signal {name,data}, world.edited. Contacts target both creation bodies; ground is other:ground. Only events targeting scoped entities are delivered. Events do not invoke a model.",
   example:
     'return {tick(){const e=api.get("orb");if(e&&!e.heldBy)api.emit([{op:"entity.patch",id:"orb",patch:{transform:{position:[Math.cos(api.time)*.5,1,Math.sin(api.time)*.5]}}}]);},event(e){if(e.type==="control")api.state.lastValue=e.data.value;}};',
   lifecycle:
@@ -288,7 +306,26 @@ export class CreationPrograms {
             JSON.stringify(data.state).length > 32000
           )
             throw Error("Program output budget exceeded");
-          const operations = data.operations.filter((op) => {
+          const signals = [];
+          const propertyChanges = [];
+          const translated = data.operations.flatMap(op => {
+            if (!["figment.property", "figment.signal"].includes(op?.op)) return [op];
+            if (!r.entityIds.includes(op.id) || op.id !== r.params.__figment?.root)
+              throw Error("Program cannot control this Figment");
+            const entity = this.world.store.document.entities.find(e => e.id === op.id);
+            if (!entity?.figment) throw Error("Missing Figment definition");
+            if (op.op === "figment.signal") {
+              identifier(op.name);
+              if (signals.length >= 16 || JSON.stringify(op.data).length > 2048) throw Error("Signal budget exceeded");
+              signals.push(op);
+              return [];
+            }
+            const property = entity.figment.properties[op.name];
+            if (!property) throw Error(`Unknown Figment property: ${op.name}`);
+            propertyChanges.push({ op: "figment.property", id: op.id, name: op.name, value: propertyValue(property, op.value) });
+            return [];
+          });
+          const operations = translated.filter((op) => {
             if (
               !["entity.patch", "body.impulse", "joint.motor"].includes(op?.op)
             )
@@ -319,19 +356,22 @@ export class CreationPrograms {
                     "geometry",
                     "control",
                     "visible",
+                    "physics",
                   ].includes(k),
               )
             )
               throw Error(
                 "Programs may animate geometry, transforms, materials, controls and visibility",
               );
-            return !this.world.store.heldBy(op.id);
+            return !this.world.store.heldBy(op.id) || (op.op === "entity.patch" && Object.keys(op.patch ?? {}).every(k => ["material", "control", "visible"].includes(k)));
           });
+          operations.push(...propertyChanges);
           if (operations.length)
             this.world.store.apply(
               { requestId: crypto.randomUUID(), operations },
               `program:${r.id}`,
             );
+          for (const signal of signals) this.world.store.emit("signal", `program:${r.id}`, signal.id, { name: signal.name, data: signal.data });
           r.state = structuredClone(data.state);
           r.frames++;
           r.busy = false;

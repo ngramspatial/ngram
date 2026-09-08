@@ -184,7 +184,7 @@ Models can be FBX, GLB/glTF, or the built-in procedural avatar. See the
 
 ## Spatial tools and capabilities
 
-During an `ngram_ar` turn, the Entity receives 23 native spatial function
+During an `ngram_ar` turn, the Entity receives 28 native spatial function
 tools. They are not a separate character or agent: the same Entity, memory,
 relationships, and tool loop that answer on text surfaces also choose the body
 and scene actions below. Actions are delivered to the connected surface while
@@ -198,6 +198,11 @@ delivery if the live connection is interrupted.
 | `ar_inspect_surface` | none | Returns the current surface, available spatial tools, and bounded live spatial context. |
 | `ar_world` | `command`, `payload` | Build and program persistent spatial objects, physics, controls, and interactions. Start with `capabilities`. |
 | `ar_blender` | `command`, `payload` | Edit Blender projects on the configured execution host and publish live Spatial previews. Blender must be installed on that host. |
+| `ar_figment` | `command`, `payload` | Attach and configure portable objects with named parts, grips, properties and actions. Start with `capabilities`. |
+| `ar_figment_physics` | `command`, `payload` | Tune mass, gravity, friction, bounce, damping, axis locks, compound collision shapes and sensors. |
+| `ar_figment_behavior` | `command`, `payload` | Write local JavaScript behavior against named parts, properties, anchors and joints; pause, resume or reset it. |
+| `ar_figment_interact` | `command`, `payload` | Set exposed properties and invoke the same actions available to people in the Objects panel. |
+| `ar_figment_library` | `command`, `payload` | Publish immutable local versions, export files to share, import packages and place editable copies. |
 | `ar_move_to` | `target`, `speed="walk"` | Moves relative to the user or current scene. Targets: `user`, `away`, `forward`, `left`, `right`, `random`. Speeds: `walk`, `fast`. |
 | `ar_gesture` | `gesture` | Plays a semantic body gesture from the shell's animation pack, with a built-in fallback when no matching clip exists. |
 | `ar_emote` | `emotion`, `intensity=0.6` | Expresses `attentive`, `calm`, `concerned`, `curious`, `excited`, `happy`, or `thoughtful`; intensity is clamped to `0..1`. |

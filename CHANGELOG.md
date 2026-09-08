@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### The Figment Update
+
+Objects can carry their own behavior. Attach a Figment to a Blender model or Spatial assembly, name its parts and grips, give it adjustable physics, and let people operate it directly. Publish a complete version and share an editable copy.
+
+- Added a five-tool Figment bundle for authoring, physics, local behavior, human-compatible interactions, and portable publishing. Native Spatial now exposes 28 tools.
+- Added typed object properties, named actions, stable mesh-node anchors, one- and two-hand grips, and scoped JavaScript using named part and joint bindings.
+- Extended physics to Blender assets and compound assemblies: mass, gravity, friction, bounce, linear/angular damping, axis locks, collision masks, convex shapes and sensors. Contact events include measured impact data and ground contacts.
+- Added Figment controls to the existing Objects drawer, including editable physical properties, grips, motor/constraint settings, behavior source and version publishing. Whole assemblies duplicate with independent IDs; imports and restored behavior remain paused.
+- Added self-contained `.figment.json` packages, SHA-256 integrity checks, an IndexedDB library, and editable Blender source retention. Publishing creates a local immutable version; sharing uses exported files.
+- Kept simulation local: actions, physics and behavior do not trigger model turns. Routine observations omit source, package export returns a small receipt, and Stop cancels pending package downloads and local programs.
+
+Update the Python worker and Spatial client together. Headset grip paths have automated pose/input coverage; headset feel and scanned-room collision are not claimed. See the separate [Figment guide](https://docs.ngram.space/spatial/figments).
+
 ### Spatial creations and Blender
 
 Agents can build objects that people can pick up, reshape, and operate. Blender projects publish real geometry into Spatial as the agent works; local programs give those creations behavior after the conversation ends.

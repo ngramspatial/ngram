@@ -1,4 +1,7 @@
 /** Harness-independent creation protocol. Metres, radians, seconds, right-handed Y-up. */
+import { parseFigment, assetReference, type FigmentDefinition } from "./figment-contract.js";
+import { parseBody, type Body } from "./physics-contract.js";
+export type { Body } from "./physics-contract.js";
 export const WORLD_PROTOCOL = "ngram.world/1" as const;
 export const WORLD_LIMITS = Object.freeze({
   entities: 512,
@@ -33,14 +36,6 @@ export interface Geometry {
   indices?: number[];
   instances?: V3[];
 }
-export interface Body {
-  mode: "fixed" | "dynamic" | "kinematic";
-  mass: number;
-  restitution: number;
-  friction: number;
-  damping: number;
-  gravity: V3;
-}
 export interface Control {
   type: "button" | "toggle" | "slider";
   label: string;
@@ -59,6 +54,7 @@ export interface WorldEntity {
   material: Material;
   geometry: Geometry;
   physics: Body | null;
+  figment: FigmentDefinition | null;
   control: Control | null;
   grabbable: boolean;
   visible: boolean;
@@ -97,6 +93,7 @@ export type WorldOperation =
   | { op: "entity.create"; entity: unknown }
   | { op: "entity.patch"; id: string; patch: unknown }
   | { op: "entity.delete"; id: string }
+  | { op: "figment.property"; id: string; name: string; value: unknown }
   | { op: "joint.create"; joint: unknown }
   | { op: "joint.delete"; id: string }
   | { op: "joint.motor"; id: string; velocity: number; strength?: number }
@@ -191,6 +188,7 @@ export function parseEntity(value: unknown): WorldEntity {
       "material",
       "geometry",
       "physics",
+      "figment",
       "control",
       "asset",
       "grabbable",
@@ -258,27 +256,14 @@ export function parseEntity(value: unknown): WorldEntity {
   }
   let physics: Body | null = null;
   if (v.physics != null) {
-    const p = record(v.physics, "physics");
-    keys(
-      p,
-      ["mode", "mass", "restitution", "friction", "damping", "gravity"],
-      "physics",
-    );
-    physics = {
-      mode: choice(p.mode, ["fixed", "dynamic", "kinematic"], "dynamic"),
-      mass: number(p.mass, 1, 0.001, 1000),
-      restitution: number(p.restitution, 0.35, 0, 1),
-      friction: number(p.friction, 0.5, 0, 10),
-      damping: number(p.damping, 0.2, 0, 100),
-      gravity: vector(p.gravity, [0, -9.81, 0], -100, 100),
-    };
+    physics = parseBody(v.physics);
     if (
-      kind !== "shape" ||
+      !["shape", "asset", "group"].includes(kind) ||
       geometry.instances ||
-      ["mesh", "line", "torus"].includes(geometry.shape)
+      (!physics.colliders.length && (kind !== "shape" || ["mesh", "line", "torus"].includes(geometry.shape)))
     )
       throw new Error(
-        "Physics supports uninstanced box, sphere, cylinder or cone shapes",
+        "Physics requires an uninstanced primitive or explicit colliders for an asset, group or custom shape",
       );
     if (v.parent != null)
       throw new Error(
@@ -308,14 +293,7 @@ export function parseEntity(value: unknown): WorldEntity {
   if (kind === "asset") {
     const a = record(v.asset, "asset");
     keys(a, ["url", "format", "fit", "preserveMaterials", "normalize"], "asset");
-    const url = text(a.url, "", 2048);
-    if (!/^https?:\/\//i.test(url) && !/^\/(?!\/)/.test(url))
-      throw new Error("Assets require HTTP(S) or a root-relative URL");
-    if (/^https?:\/\//i.test(url)) {
-      const parsed = new URL(url);
-      if (parsed.username || parsed.password)
-        throw new Error("Do not put credentials in asset URLs");
-    }
+    const url = assetReference(a.url);
     asset = {
       url,
       format: choice(a.format, ["glb", "image"], "glb"),
@@ -346,6 +324,7 @@ export function parseEntity(value: unknown): WorldEntity {
     },
     geometry,
     physics,
+    figment: v.figment == null ? null : parseFigment(v.figment),
     control,
     asset,
     grabbable: bool(v.grabbable, kind === "shape" || kind === "asset"),
@@ -365,11 +344,17 @@ export function patchEntity(entity: WorldEntity, value: unknown): WorldEntity {
     "material",
     "geometry",
     "physics",
+    "figment",
     "control",
     "asset",
   ]) {
     if (patch[k] != null)
       (merged as any)[k] = { ...(entity as any)[k], ...record(patch[k], k) };
+  }
+  // The legacy damping control continues to adjust both axes unless specified.
+  if (patch.physics?.damping !== undefined) {
+    merged.physics!.linearDamping = patch.physics.linearDamping ?? patch.physics.damping;
+    merged.physics!.angularDamping = patch.physics.angularDamping ?? patch.physics.damping;
   }
   if (
     entity.asset &&
@@ -444,6 +429,7 @@ export const WORLD_API_HELP = {
     "joint.delete {id}",
     "joint.motor {id,velocity,strength?}",
     "body.impulse {id,impulse:[x,y,z],torque?:[x,y,z]}",
+    "figment.property {id,name,value} (typed values remain interactive while held)",
   ],
   entity: {
     id: "unique-id",
@@ -467,7 +453,8 @@ export const WORLD_API_HELP = {
       glow: 0,
     },
     physics:
-      "optional {mode:fixed|dynamic|kinematic,mass,restitution,friction,damping,gravity:[0,-9.81,0]}",
+      "optional {mode:fixed|dynamic|kinematic,mass,restitution,friction,damping,linearDamping,angularDamping,gravity:[0,-9.81,0],translations:[true,true,true],rotations:[true,true,true],colliders:[{id,shape:box|sphere|capsule|cylinder|cone|convex,size:[x,y,z],position:[x,y,z],rotation:[x,y,z],sensor?:boolean,groups?:uint32,vertices?:flatXYZ}]}. Assets/groups/custom meshes require explicit colliders.",
+    figment: "optional Figment definition; see capabilities.figments or the dedicated figment tool bundle. Named parts/joints, anchors/grips, properties/actions, behavior and editable source.",
     control:
       "control kind: {type:button|toggle|slider,label,value:number,min:number,max:number,step:number}. Toggle values are numeric 0 (off) or 1 (on), not booleans.",
     grabbable: true,
@@ -492,9 +479,9 @@ export const WORLD_API_HELP = {
     "Edits validate before commit. Human grabs own transforms until release. requestId deduplicates retries; baseRevision detects conflicting edits. Simulation poses are live samples, not edit revisions. Events are polled and never automatically invoke an LLM.",
   limits: WORLD_LIMITS,
   observe:
-    "{ids?:[id,...],tag?:string,offset?:number,limit?:1..512,includeGeometry?:boolean}. Default page 16. Large geometry arrays are summarized as counts; request includeGeometry for selected entities when you need raw data.",
+    "{ids?:[id,...],tag?:string,offset?:number,limit?:1..512,includeGeometry?:boolean,includeSource?:boolean}. Default page 16. Geometry arrays and Figment source are summarized; request details only for selected entities when needed.",
   assets:
-    "kind:asset with asset:{url,format:glb|image,fit:metres}. Images and self-contained GLB files up to 32 MB. observe reports loading/ready/failed, progress and errors. Replacing an asset or deleting its entity cancels the old load. Asset entities are grabbable and may belong to groups; use simple separate shapes for physics colliders.",
+    "kind:asset with asset:{url,format:glb|image,fit:metres,normalize?:boolean,preserveMaterials?:boolean}. Images and self-contained GLB files up to 32 MB. observe reports loading/ready/failed, progress and errors. Asset roots accept explicit compound physics colliders; assets inside groups use the group's body. Figment packages resolve content-addressed figment:<hash> URLs from local binary storage.",
   perform:
     "command:perform with {action:look|approach,target:entityId}. Look sets gaze toward the live object. Approach starts a walk with a 0.7 metre standoff and returns an accepted task ID; poll events for perform.completed/perform.cancelled. Pause cancels it. No fabricated hand contact or room understanding.",
 };

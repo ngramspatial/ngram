@@ -1,5 +1,6 @@
 // @ts-nocheck
 import * as THREE from "three";
+import { nearestFigmentGrip, resolveFigmentAnchors, poseAtGrip } from "./figment-anchors.js";
 
 /** Same selection, ownership and control events for mouse, touch and XR rays. */
 export class CreationInput {
@@ -12,6 +13,8 @@ export class CreationInput {
   raycaster = new THREE.Raycaster();
   holds = new Map();
   outline;
+  showGrips = true;
+  gripMarkers = new THREE.Group();
   constructor(world, camera, canvas) {
     this.world = world;
     this.camera = camera;
@@ -19,6 +22,7 @@ export class CreationInput {
     this.outline = new THREE.Box3Helper(new THREE.Box3(), 0x6e7dff);
     this.outline.visible = false;
     world.root.parent.add(this.outline);
+    world.root.parent.add(this.gripMarkers);
     canvas.addEventListener("pointerdown", this.down, true);
     canvas.addEventListener("pointermove", this.move, true);
     canvas.addEventListener("pointerup", this.up, true);
@@ -28,6 +32,13 @@ export class CreationInput {
       passive: false,
     });
     window.addEventListener("blur", () => this.releaseAll());
+    canvas.addEventListener("dblclick", event => {
+      const hit = this.hit(this.ray(event));
+      if (hit) this.world.activate(this.grabbableParent(hit.object.userData.creationId) ?? hit.object.userData.creationId);
+    });
+    window.addEventListener("keydown", event => {
+      if (event.key.toLowerCase() === "e" && !event.repeat && !event.target?.closest?.("input,textarea,select,[contenteditable=true]")) this.world.activate(this.selected);
+    });
   }
   select(id) {
     this.selected = id;
@@ -71,8 +82,16 @@ export class CreationInput {
     }
     return null;
   }
-  private start(actor, ray) {
-    const hit = this.hit(ray);
+  private start(actor, ray, pointer = null) {
+    let hit = this.hit(ray);
+    if (pointer) {
+      // Direct hand grabs also work on handles that sit outside the visible mesh.
+      const near = [...this.world.entries.keys()].flatMap(id => {
+        const grip = nearestFigmentGrip(this.world, id, pointer.position, pointer.handedness);
+        return grip ? [{ id, grip }] : [];
+      }).sort((a, b) => a.grip.distance - b.grip.distance)[0];
+      if (near && near.grip.distance < .15) hit = { object: { userData: { creationId: near.id } }, point: new THREE.Vector3(...near.grip.pose.position), distance: 0 };
+    }
     if (!hit) return false;
     const hitId = hit.object.userData.creationId;
     const id = this.world.entries.get(hitId)?.spec.control
@@ -90,6 +109,7 @@ export class CreationInput {
       return true;
     }
     const owner = this.world.store.locks.get(id);
+    const grip = nearestFigmentGrip(this.world, id, hit.point, pointer?.handedness ?? "either", this.holds.get(owner)?.grip?.name);
     if (
       owner?.startsWith("xr:") &&
       actor.startsWith("xr:") &&
@@ -97,22 +117,24 @@ export class CreationInput {
       this.holds.has(owner) &&
       ![...this.holds.values()].some((h) => h.primary === owner)
     ) {
-      this.holds.set(actor, { id, primary: owner });
+      this.holds.set(actor, { id, primary: owner, grip });
       return true;
     }
     if (!this.world.hold(id, actor)) return false;
     this.holds.set(actor, {
       id,
+      grip,
       distance: hit.distance,
       offset: e.node.getWorldPosition(new THREE.Vector3()).sub(hit.point),
       last: e.node.position.clone(),
       time: performance.now(),
       velocity: [0, 0, 0],
     });
+    if (grip) this.world.store.emit("grip", actor, id, { grip: grip.name, anchor: grip.anchor });
     this.onDrag?.(true);
     return true;
   }
-  private hold(actor, ray) {
+  private hold(actor, ray, pointer = null) {
     const hold = this.holds.get(actor);
     if (!hold) return;
     if (hold.control) {
@@ -133,7 +155,12 @@ export class CreationInput {
       this.end(actor);
       return;
     }
-    const p = ray.at(hold.distance, new THREE.Vector3()).add(hold.offset);
+    let gripPose = null;
+    if (pointer && hold.grip) {
+      const anchor = resolveFigmentAnchors(this.world, hold.id)[hold.grip.anchor];
+      if (anchor?.ready) gripPose = poseAtGrip(e.node, anchor, pointer.position, pointer.quaternion ?? new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,0,-1), ray.direction));
+    }
+    const p = gripPose ? e.node.parent.localToWorld(new THREE.Vector3(...gripPose.position)) : ray.at(hold.distance, new THREE.Vector3()).add(hold.offset);
     e.node.parent.worldToLocal(p);
     const now = performance.now(),
       dt = Math.max(0.008, (now - hold.time) / 1000);
@@ -142,7 +169,7 @@ export class CreationInput {
     hold.time = now;
     this.world.setPose(hold.id, {
       position: p.toArray(),
-      rotation: [e.node.rotation.x, e.node.rotation.y, e.node.rotation.z],
+      rotation: gripPose?.rotation ?? [e.node.rotation.x, e.node.rotation.y, e.node.rotation.z],
       scale: e.node.scale.toArray(),
     });
   }
@@ -215,7 +242,12 @@ export class CreationInput {
     for (const p of pointers) {
       const actor = `xr:${p.id}`;
       active.add(actor);
-      if (p.isActive && !p.wasActive) this.start(actor, p.ray);
+      if (p.isActive && !p.wasActive) this.start(actor, p.ray, p);
+      if (p.actionActive && !p.actionWasActive) {
+        const hit = this.hit(p.ray);
+        const id = this.holds.get(actor)?.id ?? (hit ? this.grabbableParent(hit.object.userData.creationId) ?? hit.object.userData.creationId : null);
+        if (id) this.world.activate(id, .5, actor);
+      }
       if (this.holds.has(actor)) {
         consumed.add(p.id);
         if (!p.isActive) this.end(actor);
@@ -238,6 +270,21 @@ export class CreationInput {
             .add(second.position)
             .multiplyScalar(0.5);
         if (vector.length() < 0.04) continue;
+        const primary = this.holds.get(hold.primary);
+        if (primary.grip && hold.grip && primary.grip.twoHand === "aim") {
+          const anchors = resolveFigmentAnchors(this.world, hold.id);
+          const a = anchors[primary.grip.anchor], b = anchors[hold.grip.anchor];
+          if (a?.ready && b?.ready) {
+            const direction = new THREE.Vector3(...b.position).sub(new THREE.Vector3(...a.position));
+            if (direction.length() > .001) {
+              const delta = new THREE.Quaternion().setFromUnitVectors(direction.normalize(), vector.normalize());
+              const orientation = new THREE.Quaternion(...a.quaternion).premultiply(delta);
+              this.world.setPose(hold.id, poseAtGrip(entry.node, a, first.position, orientation));
+              primary.velocity = [0, 0, 0];
+              continue;
+            }
+          }
+        }
         if (!hold.pair)
           hold.pair = {
             distance: vector.length(),
@@ -247,7 +294,7 @@ export class CreationInput {
             rotation: entry.node.getWorldQuaternion(new THREE.Quaternion()),
             scale: entry.node.scale.clone(),
           };
-        const ratio = THREE.MathUtils.clamp(
+        const ratio = entry.spec.figment && primary.grip?.twoHand !== "scale" ? 1 : THREE.MathUtils.clamp(
             vector.length() / hold.pair.distance,
             0.1,
             10,
@@ -284,7 +331,7 @@ export class CreationInput {
     for (const p of pointers) {
       const actor = `xr:${p.id}`;
       if (p.isActive && this.holds.has(actor) && !paired.has(actor))
-        this.hold(actor, p.ray);
+        this.hold(actor, p.ray, p);
     }
     return pointers.filter((p) => !consumed.has(p.id));
   }
@@ -295,5 +342,22 @@ export class CreationInput {
       node.updateWorldMatrix(true, true);
       this.outline.box.setFromObject(node);
     }
+    const anchors = node && this.showGrips ? resolveFigmentAnchors(this.world, this.selected) : {};
+    const grips = this.world.entries.get(this.selected)?.spec.figment?.grips ?? {};
+    let index = 0;
+    for (const grip of Object.values(grips)) {
+      const pose = anchors[grip.anchor];
+      if (!pose?.ready) continue;
+      let marker = this.gripMarkers.children[index++];
+      if (!marker) {
+        marker = new THREE.Mesh(new THREE.TorusGeometry(.035, .004, 6, 24), new THREE.MeshBasicMaterial({ color: 0x6e7dff, depthTest: false, transparent: true, opacity: .9 }));
+        marker.renderOrder = 1000;
+        this.gripMarkers.add(marker);
+      }
+      marker.visible = true;
+      marker.position.fromArray(pose.position);
+      marker.quaternion.fromArray(pose.quaternion);
+    }
+    for (; index < this.gripMarkers.children.length; index++) this.gripMarkers.children[index].visible = false;
   }
 }

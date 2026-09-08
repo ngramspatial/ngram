@@ -19,6 +19,14 @@
 #creation-studio .objects { display: grid; gap: 5px; max-height: 230px; overflow: auto; }
 #creation-studio .objects button { text-align: left; text-overflow: ellipsis; white-space: nowrap; overflow: hidden; background: transparent; border-color: transparent; }
 #creation-studio .objects button:hover, #creation-studio .objects button[aria-pressed=true] { background: var(--surface-elevated); color: var(--text); border-color: var(--border); }
+#creation-studio .objects .object-part { padding-left: 24px; color: var(--text-secondary); }
 #creation-studio details { margin: 15px 0; }
 #creation-studio summary { color: var(--text-secondary); cursor: pointer; padding: 8px 0; }
 #creation-studio :is(button, a, summary):focus-visible { outline: 2px solid var(--accent); outline-offset: 2.5px; }
+#creation-studio h3 { font-size: 13.75px; font-weight: 500; margin: 16px 0 10px; }
+#creation-studio h4 { font-size: 12.5px; font-weight: 500; margin: 14px 0 8px; }
+#creation-studio .figment-inspector { border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+#creation-studio .figment-version { border-bottom: 1px solid var(--border); padding: 5px 0 10px; }
+#creation-studio input[type=checkbox] { width: 18px; height: 18px; margin: 0 0 0 10px; vertical-align: middle; accent-color: var(--accent); }
+#creation-studio .axes label { min-width: 0; font-size: 11px; }
+#creation-studio .axes label input:not([type=checkbox]) { width: 100%; }

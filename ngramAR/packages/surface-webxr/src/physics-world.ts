@@ -3,23 +3,36 @@ import RAPIER from '@dimforge/rapier3d-compat';
 
 let world: RAPIER.World | null = null;
 let rapier: typeof RAPIER | null = null;
+let eventQueue = null;
+let ground = null;
+const collisionListeners = new Set();
+export function onPhysicsCollision(listener) {
+  collisionListeners.add(listener);
+  return () => collisionListeners.delete(listener);
+}
+export function getGroundCollider() { return ground; }
 
 export async function initPhysics(): Promise<void> {
   await RAPIER.init();
   rapier = RAPIER;
   world = new RAPIER.World({ x: 0, y: 0, z: 0 });
+  eventQueue?.free();
+  eventQueue = new RAPIER.EventQueue(true);
 
   // Static ground plane so panels can't fall through the floor
   const groundDesc = RAPIER.RigidBodyDesc.fixed().setTranslation(0, -0.01, 0);
   const groundBody = world.createRigidBody(groundDesc);
   const groundCollider = RAPIER.ColliderDesc.cuboid(50, 0.01, 50);
-  world.createCollider(groundCollider, groundBody);
+  ground = world.createCollider(groundCollider, groundBody);
 }
 
 export function stepPhysics(dt: number): void {
   if (!world) return;
   world.timestep = Math.min(dt, 1 / 30);
-  world.step();
+  world.step(eventQueue);
+  eventQueue.drainCollisionEvents((a, b, started) => {
+    for (const listener of collisionListeners) listener(a, b, started);
+  });
 }
 
 export function getWorld(): RAPIER.World | null {

@@ -1,4 +1,6 @@
 // @ts-nocheck
+import { figmentInspector, figmentLibraryUI } from "./figment-inspector.js";
+import { figmentScope } from "./figment-library.js";
 /** Human controls edit the same world agents observe. No private renderer shortcuts. */
 export function attachCreationStudio(
   service,
@@ -29,7 +31,11 @@ export function attachCreationStudio(
     const b = make("button", label, parent);
     b.type = "button";
     b.className = primary ? "modal-btn modal-btn-primary" : "modal-btn";
-    b.onclick = () => run(fn);
+    b.onclick = async () => {
+      if (b.disabled) return;
+      b.disabled = true;
+      try { await run(fn); } finally { b.disabled = false; }
+    };
     return b;
   };
   let opened = false;
@@ -97,6 +103,15 @@ export function attachCreationStudio(
   const list = make("div", null, body);
   list.className = "objects";
   list.setAttribute("aria-label", "World objects");
+  let showParts = false;
+  const partsToggle = button("Show parts", () => {
+    showParts = !showParts;
+    partsToggle.textContent = showParts ? "Hide parts" : "Show parts";
+    partsToggle.setAttribute("aria-pressed", String(showParts));
+    lastSignature = "";
+    refresh();
+  }, body);
+  partsToggle.setAttribute("aria-pressed", "false");
   const empty = make("p", "Ask your agent to build something. Blender projects, shapes, and interactive creations appear here.", body);
   empty.className = 'muted';
   const createRow = make("div", null, body);
@@ -135,6 +150,7 @@ export function attachCreationStudio(
   const inspector = make("div", null, body);
   let inspectorId = null;
   let inspectorAssetStatus = null;
+  let inspectionPending = false;
   function edit(patch) {
     if (!input.selected) return;
     service.world.store.apply(
@@ -146,7 +162,13 @@ export function attachCreationStudio(
     );
   }
   function inspect(id) {
+    const sameObject = inspectorId === id;
+    const openDetails = new Set(sameObject ? [...inspector.querySelectorAll("details[open]")].map(e => e.querySelector("summary")?.textContent) : []);
+    const drafts = sameObject ? [...inspector.querySelectorAll("textarea, input[type=text]")]
+      .filter(e => e.value !== e.defaultValue)
+      .map(e => [e.getAttribute("aria-label") ?? e.closest("label")?.firstChild?.textContent, e.value]) : [];
     inspector.replaceChildren();
+    inspectionPending = false;
     inspectorId = id;
     const e = service.world.store.observe({ ids: [id], includeGeometry: true })
       .entities[0];
@@ -154,6 +176,7 @@ export function attachCreationStudio(
     inspectorAssetStatus = e.asset ? e.status : null;
     make("hr", null, inspector);
     make("h2", e.name, inspector);
+    figmentInspector(service, input, { ...e, figment: service.world.entries.get(id).spec.figment }, inspector, { make, button, run, inspect, library: figmentLibrary });
     make(
       "p",
       e.grabbable
@@ -268,7 +291,8 @@ export function attachCreationStudio(
       );
     button(
       "Duplicate",
-      () => {
+      async () => {
+        if (e.figment) { input.select((await service.figments.duplicate(id)).id); return; }
         const copy = structuredClone(
           service.world.store.document.entities.find((item) => item.id === id),
         );
@@ -289,7 +313,8 @@ export function attachCreationStudio(
     );
     button(
       "Delete",
-      () => {
+      async () => {
+        if (e.figment) { await service.figments.remove(id); input.select(null); return; }
         service.world.store.apply(
           {
             requestId: crypto.randomUUID(),
@@ -301,8 +326,15 @@ export function attachCreationStudio(
       },
       actions,
     );
+    for (const detail of inspector.querySelectorAll("details")) if (openDetails.has(detail.querySelector("summary")?.textContent)) detail.open = true;
+    for (const control of inspector.querySelectorAll("textarea, input[type=text]")) {
+      const key = control.getAttribute("aria-label") ?? control.closest("label")?.firstChild?.textContent;
+      const draft = drafts.find(([label]) => label === key);
+      if (draft) control.value = draft[1];
+    }
   }
   make("hr", null, body);
+  const figmentLibrary = figmentLibraryUI(service, body, { make, button, run, origin, select: id => input.select(id) });
   const programDetails = make("details", null, body);
   make("summary", "Programs", programDetails);
   const programs = make("div", null, programDetails);
@@ -378,6 +410,8 @@ export function attachCreationStudio(
       entries.map((e) => [
         e.id,
         e.name,
+        e.figment,
+        e.physics,
         e.asset ? service.world.entries.get(e.id)?.status : null,
       ]),
       input.selected,
@@ -387,10 +421,16 @@ export function attachCreationStudio(
     if (signature !== lastSignature) {
       lastSignature = signature;
       if (input.selected && !editing) inspect(input.selected);
+      else if (input.selected) inspectionPending = true;
       list.replaceChildren();
+      const contained = new Set(entries.filter(e => e.parent).map(e => e.id));
+      for (const e of entries.filter(e => e.figment))
+        for (const id of figmentScope(service.world.store.document, e.id)) if (id !== e.id) contained.add(id);
+      partsToggle.hidden = !contained.size;
       for (const e of entries) {
+        if (!showParts && contained.has(e.id) && input.selected !== e.id) continue;
         const b = button(
-          e.asset
+          e.figment ? `${e.figment.title} · Figment` : e.asset
             ? `${e.name} · ${service.world.entries.get(e.id)?.status}`
             : e.name,
           () => {
@@ -400,6 +440,7 @@ export function attachCreationStudio(
           list,
         );
         b.setAttribute("aria-pressed", String(input.selected === e.id));
+        if (contained.has(e.id)) b.classList.add("object-part");
       }
       programs.replaceChildren();
       for (const p of service.programs.inspect()) {
@@ -448,13 +489,16 @@ export function attachCreationStudio(
   async function run(fn) {
     try {
       const result = await fn();
-      status.textContent = result?.error || "Ready.";
+      status.textContent = result?.error || result?.message || "Ready.";
       refresh();
     } catch (error) {
       status.textContent = String(error.message);
       refresh();
     }
   }
+  inspector.addEventListener("focusout", () => setTimeout(() => {
+    if (inspectionPending && !document.activeElement?.matches("input,textarea,select") && input.selected) inspect(input.selected);
+  }, 0));
   service.onChange = () => {
     if (!queued) {
       queued = true;

@@ -1,6 +1,8 @@
 // @ts-nocheck
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { readFigmentAsset } from "./figment-library.js";
+import { validateGLB } from "@ngram-ar/core";
 
 export function disposeCreationAsset(node) {
   const textures = new Set(),
@@ -27,7 +29,9 @@ export function disposeCreationAsset(node) {
 
 export async function loadCreationAsset(asset, signal, onProgress) {
   const maxBytes = 32 * 1024 * 1024;
-  const response = await fetch(asset.url, { signal, credentials: "same-origin" });
+  const response = asset.url.startsWith("figment:")
+    ? new Response(await readFigmentAsset(asset.url, { signal }))
+    : await fetch(asset.url, { signal, credentials: "same-origin" });
   if (!response.ok) throw Error(`Asset request failed (${response.status})`);
   const total = Number(response.headers.get("content-length")) || 0;
   if (total > maxBytes) {
@@ -81,43 +85,7 @@ export async function loadCreationAsset(asset, signal, onProgress) {
     );
     return mesh;
   }
-  if (size < 20) throw Error("Invalid GLB header");
-  const view = new DataView(bytes.buffer);
-  if (
-    view.getUint32(0, true) !== 0x46546c67 ||
-    view.getUint32(4, true) !== 2 ||
-    view.getUint32(8, true) !== size ||
-    view.getUint32(16, true) !== 0x4e4f534a
-  )
-    throw Error("Expected a glTF 2.0 GLB");
-  const jsonSize = view.getUint32(12, true);
-  if (jsonSize > size - 20) throw Error("Invalid GLB JSON chunk");
-  const manifest = JSON.parse(
-    new TextDecoder().decode(bytes.slice(20, 20 + jsonSize)),
-  );
-  const inspect = (value) => {
-    if (!value || typeof value !== "object") return;
-    for (const [key, nested] of Object.entries(value)) {
-      if (
-        key === "uri" &&
-        (typeof nested !== "string" || !nested.startsWith("data:"))
-      )
-        throw Error(
-          "Use self-contained GLB assets with embedded textures and buffers",
-        );
-      inspect(nested);
-    }
-  };
-  inspect(manifest);
-  let vertices = 0;
-  for (const mesh of manifest.meshes ?? [])
-    for (const primitive of mesh.primitives ?? []) {
-      const count = manifest.accessors?.[primitive.attributes?.POSITION]?.count;
-      if (!Number.isInteger(count) || count < 0)
-        throw Error("Invalid GLB geometry");
-      vertices += count;
-    }
-  if (vertices > 100000) throw Error("Asset exceeds 100,000 source vertices");
+  validateGLB(bytes);
   const gltf = await new GLTFLoader().parseAsync(bytes.buffer, "");
   if (signal.aborted) {
     disposeCreationAsset(gltf.scene);

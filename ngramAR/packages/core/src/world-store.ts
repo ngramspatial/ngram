@@ -8,6 +8,7 @@ import {
   patchEntity,
   parseJoint,
 } from "./world-contract.js";
+import { propertyValue } from "./figment-contract.js";
 import type {
   WorldDocument,
   WorldEdit,
@@ -96,6 +97,7 @@ export class WorldStore {
       offset?: number;
       limit?: number;
       includeGeometry?: boolean;
+      includeSource?: boolean;
     } = {},
   ) {
     if (
@@ -137,6 +139,10 @@ export class WorldStore {
             };
         return {
           ...structuredClone(e),
+          figment: e.figment ? {
+            ...structuredClone(e.figment),
+            behavior: e.figment.behavior ? (options.includeSource ? { ...e.figment.behavior } : { hz: e.figment.behavior.hz, sourceChars: e.figment.behavior.source.length }) : null,
+          } : null,
           geometry: structuredClone(geometry),
           ...this.adapter.sample?.(e),
           heldBy: this.heldBy(e.id),
@@ -164,6 +170,7 @@ export class WorldStore {
     if (doc.joints.length > WORLD_LIMITS.entities)
       throw new Error("World joint budget exceeded");
     const entities = new Map(doc.entities.map((e) => [e.id, e]));
+    const figmentOwners = new Map<string, string>();
     if (
       entities.size !== doc.entities.length ||
       new Set(doc.joints.map((j) => j.id)).size !== doc.joints.length
@@ -178,6 +185,25 @@ export class WorldStore {
       instances += e.geometry.instances?.length ?? 0;
       lights += Number(e.kind === "light");
       assets += Number(e.kind === "asset");
+      if (e.figment) {
+        if (e.parent) throw Error("Figment roots must be world roots");
+        const scope = new Set([e.id, ...Object.values(e.figment.parts)]);
+        let expanded = true;
+        while (expanded) {
+          expanded = false;
+          for (const part of doc.entities) if (part.parent && scope.has(part.parent) && !scope.has(part.id)) { scope.add(part.id); expanded = true; }
+        }
+        for (const id of scope) {
+          if (!entities.has(id)) throw Error(`Missing Figment part: ${id}`);
+          if (id !== e.id && entities.get(id)!.figment) throw Error("A Figment cannot own another Figment");
+          if (figmentOwners.has(id) && figmentOwners.get(id) !== e.id) throw Error(`Part ${id} already belongs to another Figment`);
+          figmentOwners.set(id, e.id);
+        }
+        for (const id of Object.values(e.figment.joints)) {
+          const joint = doc.joints.find(j => j.id === id);
+          if (!joint || !scope.has(joint.a) || !scope.has(joint.b)) throw Error(`Figment joint ${id} must connect named parts`);
+        }
+      }
       const visited = new Set([e.id]);
       let p = e.parent;
       while (p) {
@@ -255,6 +281,7 @@ export class WorldStore {
     const next = structuredClone(this.document);
     const effects: WorldOperation[] = [];
     const changed = new Set<string>();
+    const propertyEvents: { id: string; name: string; value: unknown }[] = [];
     for (const op of edit.operations) {
       if (!op || typeof op !== "object") throw new Error("Invalid operation");
       if (op.op === "entity.create") {
@@ -264,13 +291,25 @@ export class WorldStore {
           throw new Error(`Entity ${e.id} already exists; patch it`);
         next.entities.push(e);
         changed.add(e.id);
+      } else if (op.op === "figment.property") {
+        const id = identifier(op.id), name = identifier(op.name);
+        const entity = next.entities.find(e => e.id === id);
+        const property = entity?.figment?.properties[name];
+        if (!property || !Object.hasOwn(entity!.figment!.properties, name)) throw Error(`Unknown Figment property: ${name}`);
+        if (actor === "human" && !property.editable) throw Error(`Property ${name} is read-only`);
+        property.value = propertyValue(property, op.value);
+        propertyEvents.push({ id, name, value: property.value });
+        changed.add(id);
       } else if (
         op.op === "entity.patch" ||
         op.op === "entity.delete" ||
         op.op === "body.impulse"
       ) {
         const id = identifier(op.id);
-        this.assertUnlocked(id, actor, next.entities);
+        // A held lamp can still switch on. Physical pose and geometry remain owned by the hand.
+        const nonPhysicalProgramEdit = isProgram && op.op === "entity.patch" && op.patch && typeof op.patch === "object" &&
+          Object.keys(op.patch).every(k => ["material", "control", "visible"].includes(k));
+        if (!nonPhysicalProgramEdit) this.assertUnlocked(id, actor, next.entities);
         const index = next.entities.findIndex((e) => e.id === id);
         if (index < 0) throw new Error(`Unknown entity: ${id}`);
         if (op.op === "entity.patch") {
@@ -350,6 +389,7 @@ export class WorldStore {
     }
     this.interactionCheckpoints.delete(actor);
     this.document = next;
+    for (const event of propertyEvents) this.emit("property", actor, event.id, { name: event.name, value: event.value });
     const result = {
       protocol: WORLD_PROTOCOL,
       status: "completed",
@@ -364,6 +404,15 @@ export class WorldStore {
       this.emit("world.edited", actor, undefined, result);
     this.onChange?.();
     return structuredClone(result);
+  }
+  /** Validate extra components against a prospective edit, preserving receipt/lock semantics. */
+  preview(edit: WorldEdit, actor = "agent"): WorldDocument {
+    const checked = new WorldStore({ commit() {} });
+    checked.document = structuredClone(this.document);
+    checked.receipts = new Map(this.receipts);
+    for (const [id, owner] of this.locks) checked.locks.set(id, owner);
+    checked.apply(edit, actor);
+    return checked.document;
   }
   restore(value: unknown, actor = "human", history = true) {
     const v = value as WorldDocument;

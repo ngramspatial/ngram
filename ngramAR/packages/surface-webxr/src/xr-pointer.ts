@@ -18,10 +18,14 @@ export interface XRPointer {
   wasActive: boolean;
   pinchDistance?: number;
   position: THREE.Vector3;
+  quaternion: THREE.Quaternion;
+  actionActive?: boolean;
+  actionWasActive?: boolean;
 }
 
 interface PointerState {
   wasActive: boolean;
+  actionWasActive?: boolean;
 }
 
 interface RayVisual {
@@ -75,7 +79,7 @@ export class XRPointerManager {
     }
 
     for (const p of newPointers) {
-      this.prevState.set(p.id, { wasActive: p.isActive });
+      this.prevState.set(p.id, { wasActive: p.isActive, actionWasActive: p.actionActive });
     }
 
     this.updateRayVisuals();
@@ -149,6 +153,7 @@ export class XRPointerManager {
       wasActive: prev?.wasActive ?? false,
       pinchDistance,
       position: pinchMid.clone(),
+      quaternion: new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, -1), rayDir),
     };
   }
 
@@ -174,6 +179,9 @@ export class XRPointerManager {
 
     const id = `controller-${handedness}`;
     const prev = this.prevState.get(id);
+    const gripPose = source.gripSpace ? frame.getPose(source.gripSpace, refSpace) : pose;
+    const orientation = (gripPose ?? pose).transform.orientation;
+    const gripPosition = (gripPose ?? pose).transform.position;
 
     return {
       id,
@@ -182,7 +190,10 @@ export class XRPointerManager {
       ray: new THREE.Ray(origin.clone(), direction.clone()),
       isActive,
       wasActive: prev?.wasActive ?? false,
-      position: origin.clone(),
+      position: new THREE.Vector3(gripPosition.x, gripPosition.y, gripPosition.z),
+      quaternion: new THREE.Quaternion(orientation.x, orientation.y, orientation.z, orientation.w),
+      actionActive: buttons[1]?.pressed ?? false,
+      actionWasActive: prev?.actionWasActive ?? false,
     };
   }
 

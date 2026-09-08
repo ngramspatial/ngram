@@ -4,6 +4,8 @@ import { CreationPrograms, PROGRAM_API_HELP } from "./creation-programs.js";
 import { kineticWorkshop } from "./kinetic-workshop.js";
 import { resonanceGarden } from "./resonance-garden.js";
 import { BlenderProjects } from './blender-projects.js';
+import { FigmentService } from "./figment-service.js";
+import { FIGMENT_API_HELP } from "@ngram-ar/core";
 
 const STORAGE_KEY = "ngram_creation_worlds_v1";
 /** Transport-neutral actions. No action/event here initiates model inference. */
@@ -23,6 +25,7 @@ export class CreationService {
     this.world = world;
     this.programs = new CreationPrograms(world);
     this.blender = new BlenderProjects(this);
+    this.figments = new FigmentService(this);
     const changed = () => {
       this.onChange?.();
       if (!this.saveTimer)
@@ -91,6 +94,7 @@ export class CreationService {
     // Validate the complete import before pausing or replacing the user's world.
     const checked = new WorldStore({ commit() {} });
     checked.restore(doc.world, "validation", false);
+    this.figments.validateDocument(checked.document, doc.programs);
     if (doc.blender !== undefined && (!Array.isArray(doc.blender) || doc.blender.length > 8))
       throw Error('Invalid Blender project links');
     for (const link of doc.blender ?? []) this.blender.validate(link);
@@ -113,10 +117,12 @@ export class CreationService {
     for (const p of doc.programs)
       await this.programs.install(p, { start: false });
     this.blender.restore(doc.blender);
+    await this.figments.reconcile();
     this.restoreError = null;
     this.storageError = null;
   }
   async pause() {
+    this.figments.cancelPending();
     this.cancelPerformance?.();
     this.world.pause(true);
     await this.programs.command("pause");
@@ -149,9 +155,13 @@ export class CreationService {
         return {
           ...WORLD_API_HELP,
           programs: PROGRAM_API_HELP,
+          figments: FIGMENT_API_HELP,
           features: {
             blenderPreviews: true,
             physics: true,
+            figments: true,
+            compoundColliders: true,
+            portableFigmentPackages: true,
             customMeshes: true,
             instancing: true,
             groups: true,
@@ -176,6 +186,8 @@ export class CreationService {
         };
       case 'blender':
         return this.blender.attach(payload);
+      case "figment":
+        return this.figments.handle(payload);
       case "perform": {
         if (!this.perform) throw Error("This surface has no avatar performer");
         if (!["look", "approach"].includes(payload.action))
@@ -190,7 +202,12 @@ export class CreationService {
         });
       }
       case "apply":
-        return this.world.store.apply(payload);
+        {
+          this.figments.validateDocument(this.world.store.preview(payload));
+          const result = this.world.store.apply(payload);
+          await this.figments.reconcile();
+          return result;
+        }
       case "assets":
         return payload.command === "inspect"
           ? [...this.world.entries]
@@ -237,10 +254,12 @@ export class CreationService {
       case "undo":
         await this.pause();
         this.world.store.undo();
+        await this.figments.reconcile();
         return { revision: this.world.store.document.revision };
       case "redo":
         await this.pause();
         this.world.store.redo();
+        await this.figments.reconcile();
         return { revision: this.world.store.document.revision };
       case "garden":
       case "workshop": {
