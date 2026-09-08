@@ -1,6 +1,6 @@
 {
   "name": "@ngram-ar/surface-webxr",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "WebXR rendering surface for ngram AR (Three.js)",
   "type": "module",
   "scripts": {

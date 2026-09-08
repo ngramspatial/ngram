@@ -973,7 +973,7 @@ binding:
             openapi: "3.0.3",
             info: {
                 title: "ngram AR API",
-                version: "1.0.0",
+                version: "1.0.1",
                 description: "Spatial AI shells — create, manage, and message shells programmatically.",
             },
             paths: {

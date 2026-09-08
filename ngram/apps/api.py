@@ -6,13 +6,14 @@ import os
 
 from fastapi import FastAPI
 
+from ngram.__version__ import __version__
 from ngram.config import load_entity_config, load_harness_config
 from ngram.entity import Entity
 from ngram.health import check_database, check_inference
 
 
 def create_api_app() -> FastAPI:
-    app = FastAPI(title="ngram API", version="1.0.0")
+    app = FastAPI(title="ngram API", version=__version__)
 
     @app.get("/health")
     async def health() -> dict:

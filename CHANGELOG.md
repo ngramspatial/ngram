@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.0.1 - 2026-09-08
+
 ### The Figment Update
 
 Objects can carry their own behavior. Attach a Figment to a Blender model or Spatial assembly, name its parts and grips, give it adjustable physics, and let people operate it directly. Publish a complete version and share an editable copy.
@@ -31,6 +33,9 @@ Agents can build objects that people can pick up, reshape, and operate. Blender 
 Update the Python worker, execution backend, and Spatial gateway together. Blender must be installed on the execution host. World exports reference external assets; back up Blender artifacts separately. The new workflow is documented in the separate [Spatial guides](https://docs.ngram.space/spatial/creations).
 
 ### Runtime
+
+- Added an antialiased ground grid that adapts to the scene background and fades unresolved lines near the horizon.
+- Aligned application, CLI, API and workspace package versions at 1.0.1.
 
 - Changed the Python runtime and root project license to MIT, matching `ngramAR`.
 

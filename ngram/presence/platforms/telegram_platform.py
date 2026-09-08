@@ -21,6 +21,7 @@ from telegram.error import RetryAfter, TelegramError
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 from telegram.helpers import escape_markdown
 
+from ngram.__version__ import __version__
 from ngram.cognition.context_status import context_reporter
 from ngram.models import Input
 from ngram.presence.platforms.base import Platform
@@ -306,7 +307,7 @@ class TelegramPlatform(Platform):
         token: str,
         *,
         entity: Entity,
-        app_version: str = "1.0.0",
+        app_version: str = __version__,
         allowed_user_ids: set[int] | None = None,
         allowed_chat_ids: set[int] | None = None,
         operator_user_ids: set[int] | None = None,

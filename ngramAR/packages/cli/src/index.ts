@@ -9,7 +9,7 @@ const args = process.argv.slice(2);
 const command = args[0];
 const BANNER = `
 \x1b[36m╔══════════════════════════════════════╗
-║           ngram AR v1.0.0           ║
+║           ngram AR v1.0.1           ║
 ║  AR bodies · persistent entities    ║
 ╚══════════════════════════════════════╝\x1b[0m
 `;

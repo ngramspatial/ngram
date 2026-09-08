@@ -42,6 +42,7 @@ from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.responses import Response
 
+from ngram.__version__ import __version__
 from ngram.inference_gateway.backends.ollama import OllamaCompatibleBackend
 
 log = logging.getLogger("ngram.inference_gateway")
@@ -330,7 +331,7 @@ def create_app() -> FastAPI:
 
     app = FastAPI(
         title="ngram Inference Gateway",
-        version="1.0.0",
+        version=__version__,
         docs_url=None,
         redoc_url=None,
         openapi_url=None,

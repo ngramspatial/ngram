@@ -8,12 +8,14 @@ from typing import Dict
 
 from fastapi import FastAPI, Header, HTTPException, Request
 
+from ngram.__version__ import __version__
+
 
 # We use a global registry to maintain active browser sessions across RPC calls
 _browser_sessions: Dict[str, dict] = {}
 _playwright = None
 
-app = FastAPI(title="ngram Hands Server", version="1.0.0")
+app = FastAPI(title="ngram Hands Server", version=__version__)
 
 
 async def _get_browser_page(session_id: str):

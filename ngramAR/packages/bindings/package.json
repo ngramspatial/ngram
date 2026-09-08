@@ -1,6 +1,6 @@
 {
   "name": "@ngram-ar/bindings",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Bindings that connect ngram AR shells to persistent ngram entities",
   "type": "module",
   "main": "./dist/index.js",

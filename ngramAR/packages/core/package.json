@@ -1,6 +1,6 @@
 {
   "name": "@ngram-ar/core",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Shared types, protocol, and primitives for ngram AR",
   "type": "module",
   "main": "./dist/index.js",

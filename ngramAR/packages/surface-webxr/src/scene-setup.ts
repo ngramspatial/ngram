@@ -96,12 +96,6 @@ export function createScene(): SceneContext {
     scene.background = themeOverridesEnvironment(theme) ? null : makeBackground(c, e);
     const dark = theme === 'dark';
 
-    // Refresh grid floor for current theme
-    stageTex.dispose();
-    stageTex = makeGridTexture(theme);
-    stageMat.map = stageTex;
-    stageMat.needsUpdate = true;
-
     if (dark) {
       hemi.intensity = 0.3;
       ambient.intensity = 0.2;
@@ -178,69 +172,72 @@ export function createScene(): SceneContext {
 
   // Ground grid floor
   const gridSize = 20;
-  const gridRes = 2048;
   const stageGeo = new THREE.PlaneGeometry(gridSize, gridSize);
   stageGeo.rotateX(-Math.PI / 2);
+  const stageMat = new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    toneMapped: false,
+    uniforms: {
+      lineColor: { value: new THREE.Color(initialTheme === 'light' ? '#3f4656' : '#ccd0dc') },
+    },
+    vertexShader: `
+      varying vec2 groundPosition;
+      void main() {
+        groundPosition = position.xz;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform vec3 lineColor;
+      varying vec2 groundPosition;
 
-  function makeGridTexture(theme: string): THREE.CanvasTexture {
-    const c = document.createElement('canvas');
-    c.width = gridRes; c.height = gridRes;
-    const ctx = c.getContext('2d')!;
+      float gridLine(float spacing) {
+        vec2 cell = groundPosition / spacing;
+        vec2 footprint = max(fwidth(cell), vec2(0.00001));
+        vec2 distanceInPixels = abs(fract(cell + 0.5) - 0.5) / footprint;
+        // Approximately one screen pixel, with a narrow antialiased edge.
+        vec2 lines = 1.0 - smoothstep(vec2(0.15), vec2(0.85), distanceInPixels);
+        // Fade unresolved cells before they can shimmer near the horizon.
+        lines *= 1.0 - smoothstep(vec2(0.15), vec2(0.5), footprint);
+        return max(lines.x, lines.y);
+      }
 
-    ctx.clearRect(0, 0, gridRes, gridRes);
-
-    const divisions = 20;
-    const cellSize = gridRes / divisions;
-    const lineColor = theme === 'dark'
-      ? 'rgba(140, 140, 140, 0.25)'
-      : theme === 'periwinkle'
-        ? 'rgba(255, 255, 255, 0.24)'
-        : 'rgba(30, 30, 30, 0.18)';
-    const majorColor = theme === 'dark'
-      ? 'rgba(140, 140, 140, 0.4)'
-      : theme === 'periwinkle'
-        ? 'rgba(255, 255, 255, 0.42)'
-        : 'rgba(30, 30, 30, 0.3)';
-
-    // Minor grid lines
-    ctx.strokeStyle = lineColor;
-    ctx.lineWidth = 0.1;
-    for (let i = 0; i <= divisions; i++) {
-      const p = i * cellSize;
-      ctx.beginPath(); ctx.moveTo(p, 0); ctx.lineTo(p, gridRes); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(0, p); ctx.lineTo(gridRes, p); ctx.stroke();
-    }
-
-    // Major grid lines (every 5th)
-    ctx.strokeStyle = majorColor;
-    ctx.lineWidth = 0.15;
-    for (let i = 0; i <= divisions; i += 5) {
-      const p = i * cellSize;
-      ctx.beginPath(); ctx.moveTo(p, 0); ctx.lineTo(p, gridRes); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(0, p); ctx.lineTo(gridRes, p); ctx.stroke();
-    }
-
-    // Radial fade — grid vanishes toward edges
-    const fade = ctx.createRadialGradient(gridRes / 2, gridRes / 2, 0, gridRes / 2, gridRes / 2, gridRes / 2);
-    fade.addColorStop(0, 'rgba(0,0,0,0)');
-    fade.addColorStop(0.6, 'rgba(0,0,0,0)');
-    fade.addColorStop(1, theme === 'light' ? 'rgba(255,255,255,1)' : 'rgba(0,0,0,1)');
-    ctx.globalCompositeOperation = 'destination-out';
-    ctx.fillStyle = fade;
-    ctx.fillRect(0, 0, gridRes, gridRes);
-    ctx.globalCompositeOperation = 'source-over';
-
-    const tex = new THREE.CanvasTexture(c);
-    tex.wrapS = THREE.ClampToEdgeWrapping;
-    tex.wrapT = THREE.ClampToEdgeWrapping;
-    return tex;
-  }
-
-  let stageTex = makeGridTexture(initialTheme);
-  const stageMat = new THREE.MeshBasicMaterial({ map: stageTex, transparent: true, depthWrite: false });
+      void main() {
+        float minor = gridLine(1.0);
+        float major = gridLine(5.0);
+        float fade = 1.0 - smoothstep(6.0, 10.0, length(groundPosition));
+        float alpha = max(minor * 0.45, major * 0.7) * fade;
+        gl_FragColor = vec4(lineColor, alpha);
+        #include <colorspace_fragment>
+      }
+    `,
+  });
   const stagePlane = new THREE.Mesh(stageGeo, stageMat);
   stagePlane.position.y = 0.001;
   stagePlane.name = 'ground-stage';
+  // An explicit environment can differ from the UI theme. Sample each new
+  // background once so the grid keeps its contrast when either changes.
+  let lastGridBackground: THREE.Scene['background'] | undefined;
+  const backgroundColor = new THREE.Color();
+  stagePlane.onBeforeRender = () => {
+    const background = scene.background;
+    if (background === lastGridBackground) return;
+    lastGridBackground = background;
+    if (background?.isColor) {
+      backgroundColor.copy(background);
+    } else if (background?.isTexture && background.image?.getContext) {
+      const image = background.image;
+      const context = image.getContext('2d');
+      if (!context) return;
+      const pixel = context.getImageData(Math.floor(image.width / 2), Math.floor(image.height / 2), 1, 1).data;
+      backgroundColor.setRGB(pixel[0] / 255, pixel[1] / 255, pixel[2] / 255, THREE.SRGBColorSpace);
+    } else {
+      return;
+    }
+    const luminance = backgroundColor.r * 0.2126 + backgroundColor.g * 0.7152 + backgroundColor.b * 0.0722;
+    stageMat.uniforms.lineColor.value.set(luminance > 0.25 ? '#3f4656' : '#ccd0dc');
+  };
   scene.add(stagePlane);
 
   // Contact shadow

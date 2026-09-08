@@ -1,6 +1,6 @@
 {
   "name": "@ngram-ar/gateway",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "WebSocket gateway for ngram AR — routes between agent bindings and shell surfaces",
   "type": "module",
   "main": "./dist/index.js",

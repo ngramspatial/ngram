@@ -1,6 +1,6 @@
 {
   "name": "@ngram-ar/cli",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "CLI for ngram AR — init, dev, and manage spatial AI agents",
   "type": "module",
   "main": "./dist/index.js",

@@ -9,6 +9,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from ngram.__version__ import __version__
 from ngram.container.restore import runtime_entity_key
 from ngram.entity_factory import (
     FACTORY_SCHEMA_VERSION,
@@ -27,7 +28,7 @@ def create_entity_factory_app(declarations_dir: Path) -> FastAPI:
     root.mkdir(parents=True, exist_ok=True)
     app = FastAPI(
         title="ngram Studio · Entity Factory",
-        version="1.0.0",
+        version=__version__,
         docs_url=None,
         redoc_url=None,
     )

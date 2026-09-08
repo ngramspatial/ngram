@@ -9,4 +9,4 @@ Bump manually in this file, or run::
 The CLI ``ngram version`` and Telegram ``/version`` report this value.
 """
 
-__version__ = "1.0.0"
+__version__ = "1.0.1"

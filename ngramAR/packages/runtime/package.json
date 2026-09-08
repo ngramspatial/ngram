@@ -1,6 +1,6 @@
 {
   "name": "@ngram-ar/runtime",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Shell runtime for ngram AR — loads shells, manages voice and memory",
   "type": "module",
   "main": "./dist/index.js",

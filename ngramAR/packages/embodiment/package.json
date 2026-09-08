@@ -1,6 +1,6 @@
 {
   "name": "@ngram-ar/embodiment",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Spatial behavior and animation system for ngram AR agents",
   "type": "module",
   "main": "./dist/index.js",

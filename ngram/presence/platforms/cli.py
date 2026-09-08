@@ -11,6 +11,7 @@ from typing import Any
 
 from rich.text import Text
 
+from ngram.__version__ import __version__
 from ngram.models import Input
 from ngram.entity import Entity
 from ngram.presence.platforms.base import Platform
@@ -66,7 +67,7 @@ class CLIPlatform(Platform):
     def __init__(
         self,
         entity: Entity,
-        app_version: str = "1.0.0",
+        app_version: str = __version__,
         *,
         immersive: bool = True,
     ) -> None:

@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.background import BackgroundTask
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from ngram.__version__ import __version__
 from ngram.studio.service import StudioError, StudioSession
 
 
@@ -29,7 +30,7 @@ def create_studio_app(container_path: Path) -> FastAPI:
 
     app = FastAPI(
         title="ngram Studio",
-        version="1.0.0",
+        version=__version__,
         docs_url=None,
         redoc_url=None,
         lifespan=lifespan,
