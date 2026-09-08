@@ -9,6 +9,10 @@ import traceback
 
 import bpy
 
+# Blender's bundled Python runs this script directly, outside the ngram package.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from blender_visuals import render_view as _render_view
+
 MARKER = "NGRAM_BLENDER:"
 directory = Path(sys.argv[sys.argv.index("--") + 1]).resolve()
 latest_file = directory / "latest.json"
@@ -61,18 +65,28 @@ def publish():
     return snapshot
 
 
-scope = {"bpy": bpy, "publish": publish, "__name__": "__ngram_blender__"}
+renders = []
+def render_view(**options):
+    view = _render_view(directory, revision, **options)
+    renders.append(view)
+    del renders[:-4]
+    return view
+
+
+scope = {"bpy": bpy, "publish": publish, "render_view": render_view, "__name__": "__ngram_blender__"}
 for line in sys.stdin:
     try:
         command = json.loads(line)
+        renders.clear()
         scope.pop("result", None)
         exec(compile(command["source"], "<agent-blender-edit>", "exec"), scope)
         # Publish the final state even if the script emitted earlier checkpoints.
-        publish()
+        if command.get("publish", True):
+            publish()
         result = scope.get("result")
         encoded = json.dumps(result, allow_nan=False)
         if len(encoded.encode()) > 32000:
             raise RuntimeError("Inspection result exceeds 32 KB; return a smaller selection")
-        emit({"type": "result", "ok": True, "result": result})
+        emit({"type": "result", "ok": True, "result": result, "renders": renders})
     except BaseException:
         emit({"type": "result", "ok": False, "error": traceback.format_exc()[-4000:]})

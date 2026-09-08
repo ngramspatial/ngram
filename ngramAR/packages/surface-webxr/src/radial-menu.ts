@@ -37,6 +37,7 @@ export class RadialMenu {
   private highlightedIndex = -1;
   private _isOpen = false;
   private micActive = false;
+  private visionActive = false;
 
   get isOpen(): boolean {
     return this._isOpen;
@@ -200,7 +201,17 @@ export class RadialMenu {
   setMicState(active: boolean): void {
     if (this.micActive === active) return;
     this.micActive = active;
-    const i = MENU_ITEMS.findIndex(item => item.id === 'mic');
+    this.refreshItem('mic');
+  }
+
+  setVisionState(active: boolean): void {
+    if (this.visionActive === active) return;
+    this.visionActive = active;
+    this.refreshItem('vision');
+  }
+
+  private refreshItem(id: string): void {
+    const i = MENU_ITEMS.findIndex(item => item.id === id);
     if (!this.itemMeshes[i]) return;
     this.normalTextures[i].dispose();
     this.highlightTextures[i].dispose();
@@ -225,7 +236,7 @@ export class RadialMenu {
     const mic = item.id === 'mic';
     const ink = mic && !this.micActive && !highlighted ? SPATIAL.micInk : SPATIAL.text;
     const field = mic ? (this.micActive ? SPATIAL.recording : highlighted ? SPATIAL.micInk : SPATIAL.micOff)
-      : highlighted ? SPATIAL.accent : SPATIAL.surface;
+      : highlighted || (item.id === 'vision' && this.visionActive) ? SPATIAL.accent : SPATIAL.surface;
     drawSurface(ctx, 5, 5, CANVAS_W - 10, CANVAS_H - 10, field,
       highlighted ? SPATIAL.text : SPATIAL.lineStrong, 10);
     ctx.fillStyle = mic ? ink : highlighted ? SPATIAL.text : SPATIAL.accent;
@@ -235,7 +246,7 @@ export class RadialMenu {
     ctx.fillStyle = ink;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    ctx.fillText(mic ? (this.micActive ? 'Mic on' : 'Mic off') : item.label, 102, CANVAS_H / 2);
+    ctx.fillText(mic ? (this.micActive ? 'Mic on' : 'Mic off') : item.id === 'vision' ? (this.visionActive ? 'Vision on' : 'Vision off') : item.label, 102, CANVAS_H / 2);
     return spatialTexture(canvas);
   }
 }

@@ -1152,7 +1152,7 @@ export function setupUI(): UIHandle {
       type,
       category: getCategory(type),
       preview: getPreview(msg),
-      raw: JSON.stringify(msg, null, 2),
+      raw: JSON.stringify(msg, (_key, value) => typeof value === 'string' && value.startsWith('data:image/') ? '[image omitted from protocol log]' : value, 2),
     };
     protoMessages.push(entry);
 

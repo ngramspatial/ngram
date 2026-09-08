@@ -453,6 +453,21 @@ export interface RequestCaptureAction extends ProtocolMessage {
     type: "action:request_capture";
     /** Optional prompt to include when the frame is returned */
     prompt?: string;
+    /** Independent virtual camera. Images return on the correlated action receipt. */
+    options?: {
+        target?: string;
+        node?: string;
+        views?: Array<'front' | 'back' | 'left' | 'right' | 'top' | 'bottom' | 'perspective'>;
+        position?: [number, number, number];
+        lookAt?: [number, number, number];
+        orbit?: [number, number];
+        distance?: number;
+        size?: number;
+        projection?: 'perspective' | 'orthographic';
+        style?: 'scene' | 'studio' | 'clay' | 'wireframe';
+        isolate?: boolean;
+        includeColliders?: boolean;
+    };
 }
 export type NgramArWireMessage = SpatialAction | ShellEvent;
 

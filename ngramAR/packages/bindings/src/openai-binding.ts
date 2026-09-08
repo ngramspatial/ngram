@@ -99,6 +99,9 @@ export class OpenAIBinding {
             case "event:cancel_turn":
                 this.cancelActiveTurn();
                 return [createAction('action:turn_cancelled', sid, { reason: 'user' })];
+            case "event:camera_frame":
+                if (event.error || !/^data:image\/(jpeg|png|webp);base64,/.test(event.image ?? '')) return [];
+                return this.handleSpeech([{ type: 'text', text: event.prompt ?? 'Describe this virtual Spatial view.' }, { type: 'image_url', image_url: { url: event.image, detail: 'high' } }], sid);
             case "event:user_speech":
                 return event.isFinal ? this.handleSpeech(event.text, sid) : [];
             case "event:user_proximity":
@@ -190,13 +193,15 @@ export class OpenAIBinding {
         this.cancelActiveTurn();
         this.turnController = new AbortController();
         const epoch = this.turnEpoch;
-        this.addMessage({ role: "user", content: text, timestamp: Date.now() });
+        const receipt = Array.isArray(text) ? text.filter(block => block.type === 'text').map(block => block.text).join('\n') + ' [Shared view; image retained only for this turn]' : text;
+        this.addMessage({ role: "user", content: receipt, timestamp: Date.now() });
         const messages = this.buildMessages();
+        if (Array.isArray(text)) messages[messages.length - 1].content = text;
         let response;
         try { response = await this.callApi(messages); }
         catch (error) { if (epoch !== this.turnEpoch) return []; throw error; }
         if (epoch !== this.turnEpoch) return [];
-        if (response.choices[0]?.message.tool_calls?.some(tc => tc.function.name === 'world' || isFigmentTool(tc.function.name))) {
+        if (response.choices[0]?.message.tool_calls?.some(tc => tc.function.name === 'world' || tc.function.name === 'request_capture' || isFigmentTool(tc.function.name))) {
             return this.handleWorldTurn(messages, response, sessionId, epoch);
         }
         const choice = response.choices[0];
@@ -348,6 +353,7 @@ export class OpenAIBinding {
             case "request_capture":
                 return [createAction("action:request_capture", sessionId, {
                     prompt: String(args.prompt ?? "").slice(0, 500),
+                    options: args.options ?? {},
                 })];
             case "generate_motion":
                 return [createAction("action:generate_motion", sessionId, {
@@ -364,7 +370,7 @@ export class OpenAIBinding {
     async worldRequest(action) {
         if (!this.proactiveCallback) throw new Error('This adapter has no live renderer connection');
         return new Promise((resolve, reject) => {
-            const timeout = setTimeout(() => { this.worldPending.delete(action.actionId); reject(new Error('World confirmation timed out; execution unknown')); }, action.command === 'figment' && ['publish','export','import','place'].includes(action.payload?.command) ? 120000 : 8000);
+            const timeout = setTimeout(() => { this.worldPending.delete(action.actionId); reject(new Error('World confirmation timed out; execution unknown')); }, action.type === 'action:request_capture' ? 45000 : action.command === 'figment' && ['publish','export','import','place'].includes(action.payload?.command) ? 120000 : 8000);
             this.worldPending.set(action.actionId, { resolve, reject, timeout });
             try { this.proactiveCallback([action]); } catch (error) { clearTimeout(timeout); this.worldPending.delete(action.actionId); reject(error); }
         });
@@ -382,6 +388,7 @@ export class OpenAIBinding {
                 return [createAction('action:speak', sessionId, { text })];
             }
             messages.push(message);
+            const visualBlocks = [];
             for (const call of calls) {
                 if (epoch !== this.turnEpoch) return [];
                 const fingerprint = call.function.name + call.function.arguments;
@@ -390,10 +397,19 @@ export class OpenAIBinding {
                 let result;
                 try {
                     const actions = this.resolveToolCall(call, sessionId);
-                    if (call.function.name === 'world' || isFigmentTool(call.function.name)) result = await this.worldRequest(actions[0]);
+                    if (call.function.name === 'world' || call.function.name === 'request_capture' || isFigmentTool(call.function.name)) result = await this.worldRequest(actions[0]);
                     else { this.proactiveCallback?.(actions); result = { status: 'accepted', detail: 'Completion not confirmed' }; }
                 } catch (error) { if (epoch !== this.turnEpoch) return []; result = { status: 'failed', error: String(error.message) }; }
-                messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(result) });
+                let images = result?.result?.images ?? [];
+                if (!Array.isArray(images) || images.length > 4 || images.some(i => !i || typeof i.url !== 'string' || i.url.length > 5600000 || !/^data:image\/(jpeg|png|webp);base64,/.test(i.url))) {
+                    result = { status: 'failed', error: 'Invalid visual result' }; images = [];
+                }
+                messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(images.length ? { ...result, result: { ...result.result, images: images.map(i => ({ label: i.label, attached: true })) } } : result) });
+                if (images.length) visualBlocks.push(...images.flatMap(i => [{ type: 'text', text: i.label ?? 'Spatial view' }, { type: 'image_url', image_url: { url: i.url, detail: 'high' } }]));
+            }
+            if (visualBlocks.length) {
+                for (const previous of messages) if (previous._visual) previous.content = '[Previous visual inspection expired]';
+                messages.push({ role: 'user', content: visualBlocks, _visual: true });
             }
             if (epoch !== this.turnEpoch) return [];
             try { response = await this.callApi(messages); }
@@ -426,7 +442,7 @@ export class OpenAIBinding {
     async callApi(messages) {
         const body = {
             model: this.model,
-            messages,
+            messages: messages.map(({ _visual, ...message }) => message),
             tools: SPATIAL_TOOLS,
             tool_choice: "auto",
             ...(this.config.options ?? {}),

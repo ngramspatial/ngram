@@ -32,6 +32,37 @@ class _SequenceProvider:
         return res
 
 
+@pytest.mark.asyncio
+async def test_tool_image_reaches_next_model_step_but_not_saved_history(entity_config):
+    from ngram.inference.visual_results import VisualResult, visual_result
+
+    url = 'data:image/jpeg;base64,/9j/eA=='
+    visual = visual_result({'ok': True}, [{'url': url, 'label': 'Front'}])
+    observed = []
+    class Provider(_SequenceProvider):
+        async def chat_completion(self, model, messages, **kwargs):
+            observed.append(messages)
+            return await super().chat_completion(model, messages, **kwargs)
+    provider = Provider([
+        ChatCompletionResult(content='', tool_calls=[ToolCallSpec(name='ar_request_capture', arguments={}, id='view')]),
+        ChatCompletionResult(content='The blade has a raised ridge.'),
+    ])
+    async def execute(spec):
+        return visual
+    inp = Input(text='Inspect the blade', person_id='test', person_name='Test')
+    cognition = DeliberateCognition(entity_config, provider)
+    events = [event async for event in cognition.iter_responses(
+        inp, 'system', [{'role': 'user', 'content': inp.text}],
+        tools=[{'type': 'function', 'function': {'name': 'ar_request_capture', 'parameters': {}}}], tool_executor=execute)]
+    assert len(observed) == 2
+    tool = next(m for m in observed[1] if m['role'] == 'tool')
+    assert isinstance(tool['content'], VisualResult)
+    assert tool['content'].images[0]['url'] == url
+    stored = [m for e in events for m in e.history_entries if m['role'] == 'tool']
+    assert type(stored[0]['content']) is str
+    assert url not in stored[0]['content']
+
+
 @pytest.fixture
 def entity_config():
     h = HarnessConfig()

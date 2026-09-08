@@ -11,7 +11,7 @@ export async function proxyBlender(req, res, config, resource) {
     try { sameOrigin = new URL(req.headers.origin).host === req.headers.host; } catch { /* malformed origin */ }
     if (!sameOrigin) { res.writeHead(403); res.end(); return; }
   }
-  if (!/^[a-zA-Z0-9_-]{1,64}\/(?:status|stop|[1-9][0-9]*\/(?:preview\.glb|project\.blend))$/.test(resource) ||
+  if (!/^[a-zA-Z0-9_-]{1,64}\/(?:status|stop|renders\/[a-f0-9]{32}\/view\.jpg|[1-9][0-9]*\/(?:preview\.glb|project\.blend))$/.test(resource) ||
       (req.method !== 'GET' && !(req.method === 'POST' && resource.endsWith('/stop'))) ||
       (req.method === 'GET' && resource.endsWith('/stop'))) {
     res.writeHead(404); res.end(); return;

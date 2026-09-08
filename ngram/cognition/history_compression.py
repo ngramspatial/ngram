@@ -157,6 +157,8 @@ def estimate_message_tokens(msg: dict[str, Any]) -> int:
     if isinstance(content, list):
         content = gemma.stringify_content_blocks(content)
     tokens = max(1, len(str(content)) // _CHARS_PER_TOKEN) + 10
+    # Image bytes are not text tokens. Reserve a conservative image allowance.
+    tokens += len(getattr(content, "images", [])) * 1600
     for tc in msg.get("tool_calls") or []:
         if isinstance(tc, dict):
             args = tc.get("function", {}).get("arguments", "")

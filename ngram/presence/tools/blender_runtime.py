@@ -21,6 +21,8 @@ import time
 import uuid
 from typing import Any
 
+from ngram.presence.tools.blender_visuals import render_options
+
 PROTOCOL = "ngram.blender/1"
 MARKER = "NGRAM_BLENDER:"
 MAX_PREVIEW_BYTES = 32 * 1024 * 1024
@@ -79,10 +81,23 @@ class BlenderRuntime:
     def command(self, payload: dict[str, Any]) -> dict[str, Any]:
         command = payload.get("command", "capabilities")
         if command == "capabilities":
-            executable = shutil.which(os.environ.get("NGRAM_BLENDER_EXECUTABLE", "blender"))
+            projects = []
+            candidates = [str(payload.get("executable") or os.environ.get("NGRAM_BLENDER_EXECUTABLE") or "blender")]
+            for meta in sorted(self.root.glob("*/project.json"))[:128]:
+                try:
+                    data = json.loads(meta.read_text(encoding="utf-8"))
+                    projects.append({"project_id": meta.parent.name, "name": data.get("name")})
+                    if data.get("executable"):
+                        candidates.append(str(data["executable"]))
+                except (OSError, ValueError):
+                    continue
+            # Portable installs on the execution host need not be on PATH.
+            candidates.extend(str(path) for path in sorted((self.workspace / "tools").glob("blender*/blender")))
+            executable = next((resolved for candidate in candidates if (resolved := shutil.which(candidate))), None)
             return {"ok": True, "protocol": PROTOCOL, "installed": bool(executable),
                     "executable": executable, "workspace": str(self.root),
-                    "commands": ["create", "execute", "publish", "status", "stop"],
+                    "projects": projects,
+                    "commands": ["create", "execute", "publish", "render", "status", "stop"],
                     "help": "Install Blender on this execution host with your shell tools if missing. "
                     "create accepts name, optional project_id and workspace-relative blend_file. "
                     "execute accepts project_id, source (Python with bpy), optional executable path, "
@@ -90,6 +105,11 @@ class BlenderRuntime:
                     "Successful scripts automatically save .blend and publish GLB. Call publish() "
                     "inside a long script to show intermediate steps; keep units in metres. "
                     "Use result = JSON-compatible-data to return inspection results. "
+                    "render accepts project_id, executable?, timeout?, options {objects:[names], camera:name, "
+                    "position:[x,y,z], look_at:[x,y,z], orbit:[azimuth,elevation] degrees, distance:metres, "
+                    "size:256..1536, samples:1..256, style:scene|studio|clay, projection:perspective|orthographic}. "
+                    "It returns actual images without changing the published model. Call render_view(**options) "
+                    "inside execute to inspect up to four views of your working scene. Coordinates are Blender Z-up. "
                     "Stop kills running work; the last published checkpoint survives. "
                     "This is trusted execution-host Python, with the same access as shell tools."}
         if command == "create":
@@ -123,8 +143,19 @@ class BlenderRuntime:
             return p.status()
         if command in {"execute", "publish"}:
             return p.execute({**payload, "source": "" if command == "publish" else payload.get("source")})
+        if command == "render":
+            options = render_options(payload.get("options"))
+            return p.execute({**payload, "source": "result = render_view(**" + repr(options) + ")", "publish": False})
         if command == "artifact":
-            path = self.artifact(p.ident, payload.get("revision"), payload.get("name"))
+            if payload.get("render_id"):
+                ident = payload["render_id"]
+                if not isinstance(ident, str) or not re.fullmatch(r"[a-f0-9]{32}", ident):
+                    raise ValueError("Invalid render ID")
+                path = p.directory / "renders" / ident / "view.jpg"
+                if not (path.parent / "render.json").is_file() or not path.is_file():
+                    raise ValueError("Render is not complete")
+            else:
+                path = self.artifact(p.ident, payload.get("revision"), payload.get("name"))
             offset = payload.get("offset", 0)
             if type(offset) is not int or offset < 0:
                 raise ValueError("Invalid artifact offset")
@@ -153,6 +184,7 @@ class _Project:
         self.error: str | None = None
         self.output = ""
         self.result: Any = None
+        self.renders: list[dict[str, Any]] = []
         self.generation = 0
         self.updated = time.time()
 
@@ -163,7 +195,7 @@ class _Project:
             if latest.is_file():
                 snapshot = json.loads(latest.read_text(encoding="utf-8"))
             return {"ok": True, **self.meta, "state": self.state, "job_id": self.job_id,
-                    "error": self.error, "output": self.output[-12000:], "result": self.result,
+                    "error": self.error, "output": self.output[-12000:], "result": self.result, "renders": self.renders,
                     "snapshot": snapshot, "updated": self.updated,
                     "project_file": str(self.directory / "revisions" / str(snapshot["revision"]) / "project.blend") if snapshot else None}
 
@@ -175,7 +207,8 @@ class _Project:
         if not 1 <= timeout <= 86400:
             raise ValueError("timeout must be 1..86400 seconds")
         request_id = str(payload.get("request_id") or uuid.uuid4().hex)
-        fingerprint = hashlib.sha256(source.encode()).hexdigest()
+        publish_result = payload.get("publish", True) is not False
+        fingerprint = hashlib.sha256((source + str(publish_result)).encode()).hexdigest()
         with self.lock:
             if request_id == self.job_id:
                 if fingerprint != self.fingerprint:
@@ -183,11 +216,14 @@ class _Project:
                 return self.status()
             if self.state == "working":
                 raise ValueError("Blender project is busy; wait for this edit or stop it first")
-            executable = str(payload.get("executable") or os.environ.get("NGRAM_BLENDER_EXECUTABLE") or "blender")
+            executable = str(payload.get("executable") or os.environ.get("NGRAM_BLENDER_EXECUTABLE") or self.meta.get("executable") or "blender")
             resolved = shutil.which(executable)
             if not resolved:
                 raise ValueError("Blender is not installed on the execution host. Install it with your shell tools, then retry; alternatively pass executable with its full path.")
             self.state, self.error, self.output, self.result = "working", None, "", None
+            self.renders = []
+            self.meta["executable"] = resolved
+            (self.directory / "project.json").write_text(json.dumps(self.meta), encoding="utf-8")
             self.job_id, self.fingerprint = request_id, fingerprint
             self.generation += 1
             generation = self.generation
@@ -195,10 +231,10 @@ class _Project:
             scripts = self.directory / "scripts"
             scripts.mkdir(exist_ok=True)
             (scripts / f"{uuid.uuid4().hex}.py").write_text(source, encoding="utf-8")
-            threading.Thread(target=self._run, args=(resolved, source, generation, timeout), daemon=True).start()
+            threading.Thread(target=self._run, args=(resolved, source, generation, timeout, publish_result), daemon=True).start()
             return self.status()
 
-    def _run(self, executable: str, source: str, generation: int, timeout: float):
+    def _run(self, executable: str, source: str, generation: int, timeout: float, publish_result: bool = True):
         timer = threading.Timer(timeout, lambda: self.stop("Blender edit timed out", generation))
         timer.daemon = True
         timer.start()
@@ -217,7 +253,7 @@ class _Project:
                 process = self.process
             # A large write can block while Blender starts. Stop must still be
             # able to acquire the lock and terminate that process immediately.
-            process.stdin.write(json.dumps({"source": source}) + "\n")
+            process.stdin.write(json.dumps({"source": source, "publish": publish_result}) + "\n")
             process.stdin.flush()
             for line in process.stdout:
                 with self.lock:
@@ -232,6 +268,7 @@ class _Project:
                     if message["type"] == "result":
                         self.state = "ready" if message.get("ok") else "failed"
                         self.error, self.result = message.get("error"), message.get("result")
+                        self.renders = message.get("renders", [])[-4:]
                         if self.error:
                             # Discard partial, uncheckpointed edits before another script runs.
                             self._kill()

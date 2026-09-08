@@ -483,7 +483,8 @@ async def websocket_handler(request: web.Request) -> web.WebSocketResponse:
 
     entity: Entity = request.app["entity"]
     activity_hub = request.app[_TURN_ACTIVITY_HUB_KEY]
-    ws = web.WebSocketResponse(heartbeat=30.0)
+    # Up to four bounded inspection images, correlated to a pending tool call.
+    ws = web.WebSocketResponse(heartbeat=30.0, max_msg_size=24 * 1024 * 1024)
     await ws.prepare(request)
 
     bridge_session_id: str | None = None

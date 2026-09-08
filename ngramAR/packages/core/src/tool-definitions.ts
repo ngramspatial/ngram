@@ -164,9 +164,10 @@ export const SPATIAL_TOOL_DEFINITIONS = [
     },
     {
         name: "request_capture",
-        description: "Ask the user-controlled surface for a current view image.",
+        description: "Get real Spatial images in this tool result. options supports target entityId, node name, views (front/back/left/right/top/bottom/perspective, up to 4), position/lookAt [x,y,z], orbit [azimuth,elevation] degrees, distance metres, projection perspective/orthographic, size 256..1536, isolate, style scene/studio/clay/wireframe, includeColliders. Uses an independent camera; user/headset pose stays put. Human view-sharing toggle applies. Virtual objects only; no webcam/passthrough. Inspect before/after edits; never continuously poll.",
         parameters: {
             prompt: { type: "string", description: "Why the current view is needed." },
+            options: { type: "object", description: "Inspection camera and rendering options." },
         },
         required: [],
     },

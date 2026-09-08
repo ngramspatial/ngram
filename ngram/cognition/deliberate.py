@@ -21,6 +21,7 @@ from ngram.cognition.history_compression import (
 from ngram.models import Input
 from ngram.inference.protocol import InferenceProvider
 from ngram.inference.types import ChatCompletionResult, ToolCallSpec
+from ngram.inference.visual_results import expire_visuals, text_history
 from ngram.presence.tools.registry import (
     TOOL_SYSTEM_PROMPT_PREFIX,
     TOOL_SYSTEM_PROMPT_PREFIX_COMPACT,
@@ -483,7 +484,7 @@ class DeliberateCognition:
                         "role": "user",
                         "content": recovery or _FINAL_RECOVERY_USER,
                     }
-                    msgs = msgs + [assistant_msg] + tool_msgs + [follow_user]
+                    msgs = expire_visuals(msgs + [assistant_msg] + tool_msgs + [follow_user])
                     msgs, active_turn_summary, _ = await self._compact_active_turn_if_needed(
                         msgs,
                         initial_message_count=initial_message_count,
@@ -493,7 +494,7 @@ class DeliberateCognition:
                     yield DeliberateStreamEvent(
                         kind="intermediate",
                         display_text="",
-                        history_entries=[assistant_msg] + tool_msgs + [follow_user],
+                        history_entries=text_history([assistant_msg] + tool_msgs + [follow_user]),
                     )
                     step_idx += 1
                     continue
@@ -536,7 +537,7 @@ class DeliberateCognition:
                     yield DeliberateStreamEvent(
                         kind="intermediate",
                         display_text="",
-                        history_entries=[assistant_msg] + tool_msgs,
+                        history_entries=text_history([assistant_msg] + tool_msgs),
                     )
                     merged = "\n\n".join(thinking_acc) if thinking_acc else None
                     yield DeliberateStreamEvent(
@@ -555,7 +556,7 @@ class DeliberateCognition:
                         already_sent=_messages_sent_to_user if _messages_sent_to_user else None,
                     ),
                 }
-                msgs = msgs + [assistant_msg] + tool_msgs + [follow_user]
+                msgs = expire_visuals(msgs + [assistant_msg] + tool_msgs + [follow_user])
                 msgs, active_turn_summary, _ = await self._compact_active_turn_if_needed(
                     msgs,
                     initial_message_count=initial_message_count,
@@ -566,7 +567,7 @@ class DeliberateCognition:
                 yield DeliberateStreamEvent(
                     kind="intermediate",
                     display_text="",
-                    history_entries=[assistant_msg] + tool_msgs + [follow_user],
+                    history_entries=text_history([assistant_msg] + tool_msgs + [follow_user]),
                 )
                 step_idx += 1
                 continue

@@ -30,17 +30,21 @@ def register_blender_routes(app, check_token):
             raise web.HTTPForbidden()
         client = get_execution_client_for_entity(request.app["entity"])
         name = request.match_info["name"]
-        args = {"command": "artifact", "project_id": request.match_info["project"],
-                "revision": int(request.match_info["revision"]), "name": name, "offset": 0}
+        render_id = request.match_info.get("render")
+        args = {"command": "artifact", "project_id": request.match_info["project"], "offset": 0}
+        if render_id:
+            args["render_id"] = render_id
+        else:
+            args.update(revision=int(request.match_info["revision"]), name=name)
         chunk = await client.call("blender", args)
         if not chunk.get("ok"):
             raise web.HTTPNotFound()
         size = chunk.get("size", 0)
-        maximum = 32 * 1024 * 1024 if name == "preview.glb" else 512 * 1024 * 1024
+        maximum = 4 * 1024 * 1024 if render_id else 32 * 1024 * 1024 if name == "preview.glb" else 512 * 1024 * 1024
         if not isinstance(size, int) or size <= 0 or size > maximum:
             raise web.HTTPRequestEntityTooLarge(max_size=maximum, actual_size=size)
         response = web.StreamResponse(headers={
-            "Content-Type": "model/gltf-binary" if name == "preview.glb" else "application/octet-stream",
+            "Content-Type": "image/jpeg" if render_id else "model/gltf-binary" if name == "preview.glb" else "application/octet-stream",
             "Content-Length": str(size), "Cache-Control": "private, max-age=31536000, immutable",
             "Content-Disposition": f'attachment; filename="{name}"', "X-Content-Type-Options": "nosniff",
         })
@@ -60,4 +64,5 @@ def register_blender_routes(app, check_token):
         return response
 
     app.router.add_route("*", "/blender/{project:[a-zA-Z0-9_-]{1,64}}/{command:status|stop}", handle)
+    app.router.add_get("/blender/{project:[a-zA-Z0-9_-]{1,64}}/renders/{render:[a-f0-9]{32}}/{name:view.jpg}", artifact)
     app.router.add_get("/blender/{project:[a-zA-Z0-9_-]{1,64}}/{revision:[0-9]+}/{name:preview.glb|project.blend}", artifact)

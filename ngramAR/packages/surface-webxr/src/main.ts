@@ -37,7 +37,9 @@ import { AppPanelManager } from './app-panel.js';
 import { SpatialOverlayBridge } from './spatial-overlay-bridge.js';
 import { BrowserViewer } from './browser-viewer.js';
 import { BehaviorSensorManager, type SensorContext } from './behavior-sensors.js';
-import { captureFrame, containsVisionTrigger } from './vision-capture.js';
+import { containsVisionTrigger } from './vision-capture.js';
+import { VisualInspection } from './visual-inspection.js';
+import { attachVisionControls } from './vision-controls.js';
 import { SceneObjectManager } from './scene-object-manager.js';
 import { CreationWorld } from './creation-world.js';
 import { CreationService } from './creation-service.js';
@@ -308,7 +310,9 @@ async function main() {
     quaternion: item.params.quaternion, scale: item.params.groupScale,
   }));
   let creationPerformance: {id:string;target:string}|null = null;
+  let visualInspection: VisualInspection | undefined;
   creationService.cancelPerformance = () => {
+    visualInspection?.cancel();
     const task = creationPerformance; creationPerformance = null;
     if (!task) return;
     avatar.walkTo(avatar.getPosition().clone(), 'walk', () => {});
@@ -574,7 +578,23 @@ async function main() {
   const wristMenu = new WristMenu();
   wristMenu.attach(scene);
 
-  let visionEnabled = localStorage.getItem('ngram_ar:vision') === 'true';
+  visualInspection = new VisualInspection(renderer, scene, camera, creationWorld, () => visionControls.enabled(), result => {
+    ui.addNotification(`Shared ${result.images.length} visual ${result.images.length === 1 ? 'view' : 'views'}`);
+  });
+  async function shareCurrentView(prompt = 'Describe this current Spatial view. It contains virtual objects only, not the physical room.') {
+    try {
+      const result = await visualInspection.capture({}, { manual: true });
+      connection.send({ type: 'event:camera_frame', image: result.images[0].url, prompt, spatialContext: buildSpatialContext() });
+      spatialUI.showCaptureFlash(camera);
+    } catch (error) { ui.addNotification(`View not shared: ${error.message}`); }
+  }
+  const visionControls = attachVisionControls({ onChange: enabled => {
+    if (!enabled) visualInspection.cancel();
+    radialMenu.setVisionState(enabled);
+    ui.addNotification(enabled ? 'Agent vision on · virtual scene only' : 'Agent vision off');
+    connection.send({ type: 'event:scene_update', anchors: [], spatialContext: buildSpatialContext() });
+  }, onShare: () => shareCurrentView() });
+  radialMenu.setVisionState(visionControls.enabled());
 
   const behaviorSensors = new BehaviorSensorManager(connection);
   let lastSpeechEndTime = 0;
@@ -593,6 +613,8 @@ async function main() {
     handTracking: xrCaps.handTracking,
     eyeTracking: false,
     spatialAudio: true,
+    viewCapture: true,
+    physicalCamera: false,
     hitTest: xrCaps.ar,
     planeDetection: false,
     meshDetection: false,
@@ -652,6 +674,7 @@ async function main() {
         anchors: [],
         anchorCount: 0,
         objectCount: sceneObjects.getObjectCount() + creationWorld.entries.size,
+        vision: { enabled: visionControls.enabled(), virtualScene: true, physicalCamera: false, inspectionCamera: true },
         creations: { protocol: 'ngram.world/1', revision: creationWorld.store.document.revision, count: creationWorld.entries.size, paused: creationWorld.paused },
       },
     };
@@ -708,6 +731,7 @@ async function main() {
   connection.onStatusChange((status) => {
     contextWheel.setConnected(status === 'connected');
     if (status !== 'connected') {
+      visualInspection?.cancel();
       contextDisplay = {};
       clearResponsePlayback();
       responseControl.reset();
@@ -924,6 +948,7 @@ async function main() {
         handleAgentState(msg);
         break;
       case 'action:turn_cancelled':
+        visualInspection?.cancel();
         void creationService.pause();
         if (contextDisplay.compacting) handleContextStatus({ phase: 'stopped' });
         clearResponsePlayback();
@@ -935,7 +960,7 @@ async function main() {
           ? 'Turn stopped at the time limit.' : 'Stopped.', 2500);
         break;
       case 'action:inference_status':
-        if (msg.paused) { clearResponsePlayback(); responseControl.reset(); }
+        if (msg.paused) { visualInspection?.cancel(); clearResponsePlayback(); responseControl.reset(); }
         break;
       case 'action:context_status':
         handleContextStatus(msg);
@@ -1112,27 +1137,6 @@ async function main() {
       }
 
       // ─── Vision ──────────────────────────────────────────────────────────
-      case 'action:request_capture': {
-        if (!visionEnabled) {
-          connection.send({
-            type: 'event:camera_frame',
-            image: '',
-            error: 'Vision is disabled by user',
-            spatialContext: buildSpatialContext(),
-          });
-          throw new Error('Vision is disabled by user');
-        }
-        const image = captureFrame(renderer);
-        spatialUI.showCaptureFlash(camera);
-        ui.addTranscript('agent', '[Agent requested a view capture]');
-        connection.send({
-          type: 'event:camera_frame',
-          image,
-          prompt: msg.prompt ?? undefined,
-          spatialContext: buildSpatialContext(),
-        });
-        break;
-      }
 
       // ─── Error Handling ───────────────────────────────────────────────
       case 'action:error': {
@@ -1163,6 +1167,7 @@ async function main() {
   }
 
   connection.onMessage((msg: SpatialAction) => {
+    if (msg.type === 'action:request_capture') { void visualInspection.dispatch(msg, event => connection.send(event)); return; }
     if (msg.type === 'action:world') { void creationService.dispatch(msg, event => connection.send(event)); return; }
     dispatchWithReceipt(msg, () => dispatchSpatialAction(msg), (event) => connection.send(event));
   });
@@ -1865,15 +1870,8 @@ async function main() {
           ui.addTranscript('user', text);
           ambient.recordInteraction();
 
-          if (visionEnabled && containsVisionTrigger(text)) {
-            const image = captureFrame(renderer);
-            spatialUI.showCaptureFlash(camera);
-            connection.send({
-              type: 'event:camera_frame',
-              image,
-              prompt: text,
-              spatialContext: buildSpatialContext(),
-            });
+          if (visionControls.enabled() && containsVisionTrigger(text)) {
+            void shareCurrentView(text);
           } else {
             connection.send({
               type: 'event:user_speech',
@@ -1938,6 +1936,7 @@ async function main() {
       }
       if (command.name === 'stop') { stopResponse(); notifyCommand('Response stopped.'); }
       if (command.name === 'pause') {
+        visualInspection?.cancel();
         clearResponsePlayback();
         connection.send({ type: 'event:inference_control', command: 'pause' });
       }
@@ -1959,7 +1958,8 @@ async function main() {
     ui.addTranscript('user', text);
     ui.showSubtitle('You', text, 2500);
     ambient.recordInteraction();
-    connection.send({
+    if (visionControls.enabled() && containsVisionTrigger(text)) void shareCurrentView(text);
+    else connection.send({
       type: 'event:user_speech',
       text,
       isFinal: true,
@@ -1985,6 +1985,7 @@ async function main() {
     ui.hideSubtitle();
   }
   function stopResponse(): void {
+    visualInspection?.cancel();
     void creationService.pause();
     clearResponsePlayback();
     responseControl.reset();
@@ -2404,15 +2405,9 @@ async function main() {
     } else if (id === 'theme') {
       ui.toggleTheme();
     } else if (id === 'vision') {
-      const image = captureFrame(renderer);
-      spatialUI.showCaptureFlash(camera);
-      ui.addTranscript('user', '[Shared current view with agent]');
-      connection.send({
-        type: 'event:camera_frame',
-        image,
-        prompt: 'The user manually shared their current view with you. Describe what you see.',
-        spatialContext: buildSpatialContext(),
-      });
+      const enabled = visionControls.toggle();
+      spatialUI.showStatus(enabled ? 'Agent vision on. Sharing your virtual view.' : 'Agent vision off.');
+      if (enabled) void shareCurrentView();
     } else if (id === 'resize') {
       resizeMode = true;
       panels.enterResizeMode();

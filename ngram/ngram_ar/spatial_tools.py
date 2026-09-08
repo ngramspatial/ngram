@@ -518,11 +518,9 @@ async def _ar_set_environment(preset: str) -> str:
     return receipt or f"[spatial: environment {name} queued]"
 
 
-async def _ar_request_capture(prompt: str = "") -> str:
-    if not _spatial_available():
-        return "[spatial: unavailable; no connected Spatial session]"
-    receipt = await _dispatch({"type": "action:request_capture", "prompt": (prompt or "").strip()[:500]})
-    return receipt or "[spatial: view capture requested]"
+async def _ar_request_capture(prompt: str = "", options: dict[str, Any] | None = None) -> str:
+    from ngram.ngram_ar.visual_tools import request_capture
+    return await request_capture(prompt, options)
 
 
 async def _ar_generate_motion(
@@ -756,7 +754,7 @@ _SCHEMA_ENVIRONMENT: dict[str, Any] = {
 }
 _SCHEMA_CAPTURE: dict[str, Any] = {
     "type": "object",
-    "properties": {"prompt": {"type": "string"}},
+    "properties": {"prompt": {"type": "string"}, "options": {"type": "object", "description": "Independent inspection camera, target and diagnostic views; see tool description."}},
     "required": [],
 }
 _SCHEMA_MOTION: dict[str, Any] = {
@@ -932,9 +930,10 @@ def register_ngram_ar_spatial_tools(registry: ToolRegistry) -> None:
         _ar_set_environment,
         parameters_schema=_SCHEMA_ENVIRONMENT,
     )
+    from ngram.ngram_ar.visual_tools import CAPTURE_HELP
     registry.register_fn(
         "ar_request_capture",
-        "Connected Spatial body (available from any chat) â€” ask the user-controlled surface for a current view image.",
+        CAPTURE_HELP,
         _ar_request_capture,
         parameters_schema=_SCHEMA_CAPTURE,
     )

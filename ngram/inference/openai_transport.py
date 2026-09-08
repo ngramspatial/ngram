@@ -140,6 +140,8 @@ class OpenAICompatibleTransport:
         stream: bool = False,
         num_ctx: Optional[int] = None,
     ) -> dict[str, Any]:
+        from ngram.inference.visual_results import chat_messages
+        messages = chat_messages(messages)
         if self.gemma_shaping:
             sys_parts: list[str] = []
             rest: list[dict[str, Any]] = []
@@ -384,6 +386,7 @@ class OpenAIResponsesTransport(OpenAICompatibleTransport):
         return blocks
 
     def _responses_input(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        from ngram.inference.visual_results import VisualResult, content_blocks
         items: list[dict[str, Any]] = []
         for message in messages:
             role = str(message.get("role") or "user")
@@ -391,7 +394,9 @@ class OpenAIResponsesTransport(OpenAICompatibleTransport):
                 call_id = str(message.get("tool_call_id") or "").strip()
                 if call_id:
                     output = message.get("content", "")
-                    if not isinstance(output, str):
+                    if isinstance(output, VisualResult):
+                        output = self._message_content(content_blocks(output))
+                    elif not isinstance(output, str):
                         output = json.dumps(output, ensure_ascii=False)
                     items.append({
                         "type": "function_call_output",
