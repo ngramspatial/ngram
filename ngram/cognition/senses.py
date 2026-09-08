@@ -36,7 +36,7 @@ def input_to_message_content(
     text0 = f"{speaker_prefix}{inp.text}" if speaker_prefix else inp.text
     parts: list[dict[str, Any]] = [{"type": "text", "text": text0}]
 
-    for img in inp.images[:3]:
+    for img in inp.images:
         b64 = img.get("base64")
         mime = img.get("mime") or img.get("mime_type")
         path = img.get("path")
@@ -61,6 +61,10 @@ def input_to_message_content(
                 },
             }
         )
+
+    for file in inp.files:
+        if file.get('filename') and file.get('file_data'):
+            parts.append({'type': 'input_file', 'filename': file['filename'], 'file_data': file['file_data']})
 
     for aud in inp.audio[:1]:
         b64a = aud.get("base64")

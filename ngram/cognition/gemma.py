@@ -564,6 +564,9 @@ def stringify_content_blocks(blocks: list[dict[str, Any]]) -> str:
             out.append(IMAGE_TOKEN)
         elif t == "input_audio":
             out.append(AUDIO_TOKEN)
+        elif t in {'input_file', 'file'}:
+            file = b.get('file', b)
+            out.append(f'[Attached file: {file.get("filename", "document")}]')
         else:
             out.append(str(b))
     return "\n".join(out)

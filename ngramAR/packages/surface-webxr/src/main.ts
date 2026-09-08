@@ -1,4 +1,5 @@
 // @ts-nocheck
+import { setupAttachments } from './attachment-composer.js';
 import * as THREE from 'three';
 import { loadSpatialAssets } from './spatial-design.js';
 import { createScene } from './scene-setup.js';
@@ -1925,9 +1926,11 @@ async function main() {
 
   // --- Desktop UI event listeners ---
   function notifyCommand(text: string): void { ui.addNotification(text); showCommandNotice(text); }
-  function sendTextMessage() {
+  const attachments = setupAttachments(ui.textInput, () => activeShellSlug, notifyCommand);
+  let sendingMessage = false;
+  async function sendTextMessage() {
     const text = ui.textInput.value.trim();
-    if (!text) return;
+    if (!text && !attachments.hasFiles()) return;
     const command = parseSlashCommand(text);
     if (command) {
       if (!command.valid) { notifyCommand('Unknown command. Type /help to see commands.'); return; }
@@ -1936,6 +1939,7 @@ async function main() {
       }
       if (command.name === 'stop') { stopResponse(); notifyCommand('Response stopped.'); }
       if (command.name === 'pause') {
+        if (attachments.isUploading()) attachments.cancelUpload();
         visualInspection?.cancel();
         clearResponsePlayback();
         connection.send({ type: 'event:inference_control', command: 'pause' });
@@ -1955,19 +1959,30 @@ async function main() {
       ui.textInput.dispatchEvent(new Event('input'));
       return;
     }
-    ui.addTranscript('user', text);
-    ui.showSubtitle('You', text, 2500);
-    ambient.recordInteraction();
-    if (visionControls.enabled() && containsVisionTrigger(text)) void shareCurrentView(text);
-    else connection.send({
-      type: 'event:user_speech',
-      text,
-      isFinal: true,
-      spatialContext: buildSpatialContext(),
-    });
-    ui.textInput.value = '';
-    ui.textInput.style.height = 'auto';
-    ui.textInput.dispatchEvent(new Event('input'));
+    if (sendingMessage) return;
+    if (!connection.isConnected()) { notifyCommand('Connect an agent before sending. Your draft is still here.'); return; }
+    sendingMessage = true;
+    const shell = activeShellSlug;
+    const draftText = ui.textInput.value;
+    try {
+      const files = attachments.hasFiles() ? await attachments.prepare() : [];
+      if (!connection.isConnected() || shell !== activeShellSlug) throw Error('Connection changed. Your draft is still here; reconnect and retry.');
+      if (!files.length && visionControls.enabled() && containsVisionTrigger(text)) void shareCurrentView(text);
+      else connection.send({
+        type: 'event:user_speech', text, isFinal: true,
+        ...(files.length ? { attachments: files.map(file => file.id) } : {}),
+        spatialContext: buildSpatialContext(),
+      });
+      ui.addTranscript('user', text, files);
+      ui.showSubtitle('You', text || `${files.length} attachment${files.length === 1 ? '' : 's'}`, 2500);
+      ambient.recordInteraction();
+      attachments.clear();
+      if (ui.textInput.value === draftText) ui.textInput.value = '';
+      ui.textInput.style.height = 'auto';
+      ui.textInput.dispatchEvent(new Event('input'));
+    } catch (error) {
+      if (error?.name !== 'AbortError') notifyCommand(error?.message || 'Could not send attachments. Your draft is still here.');
+    } finally { sendingMessage = false; }
   }
 
   attachSlashCommands(ui.textInput, sendTextMessage);
@@ -1985,6 +2000,7 @@ async function main() {
     ui.hideSubtitle();
   }
   function stopResponse(): void {
+    if (attachments?.isUploading()) attachments.cancelUpload();
     visualInspection?.cancel();
     void creationService.pause();
     clearResponsePlayback();
@@ -2146,6 +2162,7 @@ async function main() {
 
   // --- Browse Shells ---
   ui.onShellSelect((slug) => {
+    attachments.clear();
     connection.switchShell(slug);
   });
 
@@ -2642,12 +2659,13 @@ async function main() {
 
   // Auto-save after each message
   const origAddTranscript = ui.addTranscript;
-  ui.addTranscript = (role: 'user' | 'agent', text: string) => {
-    origAddTranscript(role, text);
+  ui.addTranscript = (role: 'user' | 'agent', text: string, files = []) => {
+    origAddTranscript(role, text, files);
     scheduleChatSave();
   };
 
   ui.onNewChat(() => {
+    attachments.clear();
     if (ui.getMessages().length > 0) {
       saveCurrentChat();
     }
@@ -2660,6 +2678,7 @@ async function main() {
 
   ui.onChatSelect((chatId) => {
     if (chatId === currentChatId) return;
+    attachments.clear();
     if (ui.getMessages().length > 0 && currentChatId) {
       saveCurrentChat();
     }

@@ -142,6 +142,14 @@ class OpenAICompatibleTransport:
     ) -> dict[str, Any]:
         from ngram.inference.visual_results import chat_messages
         messages = chat_messages(messages)
+        messages = [
+            {**message, 'content': [
+                {'type': 'file', 'file': {k: block[k] for k in ('filename', 'file_data', 'file_id') if k in block}}
+                if isinstance(block, dict) and block.get('type') == 'input_file' else block
+                for block in message['content']
+            ]} if isinstance(message.get('content'), list) else message
+            for message in messages
+        ]
         if self.gemma_shaping:
             sys_parts: list[str] = []
             rest: list[dict[str, Any]] = []
@@ -381,6 +389,8 @@ class OpenAIResponsesTransport(OpenAICompatibleTransport):
                     blocks.append(image)
             elif kind == "input_file":
                 blocks.append(dict(block))
+            elif kind == 'input_audio':
+                raise ValueError('Responses audio input needs transcription before inference')
             else:
                 blocks.append({"type": "input_text", "text": json.dumps(block, ensure_ascii=False)})
         return blocks

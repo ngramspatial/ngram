@@ -1781,6 +1781,12 @@ class Entity:
             return label + body[: max(1, room - 1)] + "…"
 
         t = (inp.text or "").strip()
+        if inp.metadata.get('message_attachments'):
+            receipts = [f'Attachment {item["name"]}: {path}' for item, path in zip(
+                inp.metadata['message_attachments'], inp.metadata.get('attachment_storage_refs', []),
+            )]
+            # Paths survive history clipping; binary data never enters the journal.
+            return clip_body('\n'.join(receipts) + '\n' + inp.metadata.get('attachment_user_text', ''))
         if isinstance(inp.metadata, dict) and inp.metadata.get("clarification_id"):
             t = f"[Clarification reply]\n{t}" if t else "[Clarification reply]"
         if inp.images:

@@ -51,7 +51,7 @@ async def persist_incoming_attachments(store: AttachmentBlobStore, inp: Input) -
     ``inp.metadata["attachment_storage_refs"]`` to the list of refs (for episodes / audits).
     On failure for one blob, logs and continues so perception can still proceed in-memory.
     """
-    refs: list[str] = []
+    refs: list[str] = list(inp.metadata.get('attachment_storage_refs') or [])
     new_images: list[dict[str, Any]] = []
     for i, img in enumerate(inp.images):
         d = dict(img)
@@ -132,7 +132,7 @@ async def persist_incoming_attachments(store: AttachmentBlobStore, inp: Input) -
             )
         new_audio.append(d)
 
-    meta = {**inp.metadata, "attachment_storage_refs": refs}
+    meta = {**inp.metadata, "attachment_storage_refs": list(dict.fromkeys(refs))}
     return replace(inp, images=new_images, audio=new_audio, metadata=meta)
 
 

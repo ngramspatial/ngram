@@ -945,6 +945,14 @@ async def _handle_shell_event(
         text = str(event.get("text") or "").strip()
         if not event.get("isFinal", True):
             return []
+        prepared = None
+        if event.get('attachments'):
+            from ngram.ngram_ar.message_media import prepare_message_attachments
+            try:
+                prepared = await prepare_message_attachments(entity, event['attachments'])
+            except ValueError as exc:
+                return [{'type': 'action:error', 'message': str(exc), 'sessionId': bridge_session_id}]
+            text = '\n\n'.join([text, *prepared['notes']]).strip()
         if not text:
             return _speak_and_look(bridge_session_id, "…")
         live_context = _spatial_context_markdown(spatial_context)
@@ -957,7 +965,13 @@ async def _handle_shell_event(
             person_name=bridge_person_name(),
             channel=bridge_session_id,
             platform="ngram_ar",
-            metadata=_ngram_ar_metadata(shell_slug, shell_name, turn_context),
+            images=prepared['images'] if prepared else [],
+            files=prepared['files'] if prepared else [],
+            metadata=_ngram_ar_metadata(shell_slug, shell_name, turn_context, {
+                'attachment_storage_refs': prepared['refs'],
+                'message_attachments': prepared['descriptors'],
+                'attachment_user_text': str(event.get('text') or '').strip(),
+            } if prepared else None),
         )
         return await perceive_with_ar_output(inp)
 
@@ -1079,6 +1093,8 @@ async def create_bridge_app(entity: Entity) -> web.Application:
     app.router.add_get("/health", health_handler)
     from ngram.ngram_ar.blender_routes import register_blender_routes
     register_blender_routes(app, _check_token)
+    from ngram.ngram_ar.attachment_routes import register_attachment_routes
+    register_attachment_routes(app, _check_token)
     app.router.add_get("/", websocket_handler)
     return app
 

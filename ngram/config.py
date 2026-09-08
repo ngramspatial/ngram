@@ -1206,9 +1206,10 @@ def validate_entity_env(entity: EntityConfig) -> list[str]:
         warnings.append(
             "Hybrid Railway: set DATABASE_URL (Postgres) — container-local SQLite is not durable"
         )
-    if mode == "hybrid_railway" and entity.harness.attachments.backend == "local_disk":
+    if (mode == "hybrid_railway" and entity.harness.attachments.backend == "local_disk"
+            and not entity.execution_workspace_dir()):
         warnings.append(
-            "Hybrid Railway: prefer attachments.backend: object_s3_compat with S3 env vars — local_disk is not durable on Railway disks"
+            "Hybrid Railway: set NGRAM_EXECUTION_WORKSPACE_DIR to a mounted persistent volume for message attachments. S3 is optional."
         )
     for pl in entity.presence.platforms:
         t = (pl.get("type") or "").lower()

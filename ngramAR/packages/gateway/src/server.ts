@@ -17,6 +17,7 @@ import { isngramEntityBinding, resolveEntityBridgeConfig } from "./resolve-entit
 import { buildArCognitionContextMarkdown } from "./ar-cognition-context.js";
 import { MotionProviderClient } from "./motion-provider.js";
 import { proxyBlender } from './blender-proxy.js';
+import { proxyAttachment } from './attachment-proxy.js';
 import { VOICE_PROVIDERS, loadVoiceConfig, normalizeVoiceConfig, publicVoiceConfig, saveVoiceConfig, voiceEnvironmentKey } from './voice-config.js';
 import {
     BRAIN_PROVIDERS,
@@ -216,6 +217,18 @@ export class NgramArServer {
         }
         const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
         const pathname = decodeURIComponent(url.pathname);
+        const attachmentMatch = pathname.match(/^\/api\/shells\/([a-z0-9-]+)\/attachments(?:\/([a-f0-9]{32}))?$/);
+        if (attachmentMatch) {
+            try {
+                const shell = await loadShellDefinition(join(resolve(this.options.shellsDir), attachmentMatch[1]));
+                if (!isngramEntityBinding(shell.binding)) throw Error('No entity attachment host');
+                return await proxyAttachment(req, res, resolveEntityBridgeConfig(shell.binding), attachmentMatch[2]);
+            } catch {
+                res.writeHead(409, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: 'Attachments require an ngram Entity worker for this agent.' }));
+                return;
+            }
+        }
         const blenderMatch = pathname.match(/^\/api\/shells\/([a-z0-9-]+)\/blender\/(.+)$/);
         if (blenderMatch) {
             try {
@@ -774,8 +787,13 @@ binding:
         }
         try {
             const body = JSON.parse(await this.readBody(req));
-            const text = body.text?.trim();
-            if (!text) {
+            const text = typeof body.text === 'string' ? body.text.trim() : '';
+            const attachments = body.attachments;
+            if (attachments !== undefined && (!Array.isArray(attachments) || attachments.length > 10 || attachments.some(id => typeof id !== 'string' || !/^[a-f0-9]{32}$/.test(id)))) {
+                res.writeHead(400, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: 'Invalid attachment IDs' })); return;
+            }
+            if (!text && !attachments?.length) {
                 res.writeHead(400, { "Content-Type": "application/json" });
                 res.end(JSON.stringify({ error: "\"text\" is required" }));
                 return;
@@ -821,6 +839,7 @@ binding:
             const event = {
                 type: "event:user_speech",
                 text,
+                ...(attachments?.length ? { attachments } : {}),
                 isFinal: true,
                 timestamp: Date.now(),
                 sessionId: sessionId,

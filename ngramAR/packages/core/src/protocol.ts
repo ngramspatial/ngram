@@ -347,6 +347,8 @@ export interface UserSpeechEvent extends ProtocolMessage {
     text: string;
     isFinal: boolean;
     confidence?: number;
+    /** IDs returned by this agent's authenticated attachment upload endpoint. */
+    attachments?: string[];
     spatialContext?: SpatialContextSnapshot;
 }
 export interface CancelTurnEvent extends ProtocolMessage {

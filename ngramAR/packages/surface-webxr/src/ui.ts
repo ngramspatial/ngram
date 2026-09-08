@@ -1,5 +1,6 @@
 // @ts-nocheck
 import { marked } from 'marked';
+import { renderAttachments, type ChatAttachment } from './attachments.js';
 import { isThemeName, nextTheme, normalizeTheme, themeUsesDarkPanels } from './theme.js';
 import { providerLogo } from './provider-logos.js';
 
@@ -28,7 +29,7 @@ export interface UIHandle {
   transcriptEl: HTMLElement;
   viewportContainer: HTMLElement;
   setStatus: (text: string, connected: boolean) => void;
-  addTranscript: (role: 'user' | 'agent', text: string) => void;
+  addTranscript: (role: 'user' | 'agent', text: string, attachments?: ChatAttachment[]) => void;
   addToolTrace: (toolName: string, description?: string) => void;
   showBusy: (label?: string) => void;
   hideBusy: () => void;
@@ -550,9 +551,9 @@ export function setupUI(): UIHandle {
   });
 
   // --- Transcript ---
-  function addTranscript(role: 'user' | 'agent', text: string): void {
+  function addTranscript(role: 'user' | 'agent', text: string, attachments: ChatAttachment[] = []): void {
     const timeStr = formatTime();
-    messageLog.push({ role, text, time: timeStr });
+    messageLog.push({ role, text, time: timeStr, ...(attachments.length ? { attachments } : {}) });
 
     const msg = document.createElement('div');
     msg.className = `msg ${role}`;
@@ -574,7 +575,8 @@ export function setupUI(): UIHandle {
     } else {
       bubble.textContent = text;
     }
-    content.appendChild(bubble);
+    if (text) content.appendChild(bubble);
+    renderAttachments(content, attachments);
 
     const time = document.createElement('div');
     time.className = 'msg-time';
@@ -665,12 +667,12 @@ export function setupUI(): UIHandle {
   function loadMessages(messages: Array<{ role: string; text: string; time: string }>): void {
     clearTranscript();
     for (const m of messages) {
-      addTranscriptWithTime(m.role as 'user' | 'agent', m.text, m.time);
+      addTranscriptWithTime(m.role as 'user' | 'agent', m.text, m.time, m.attachments);
     }
     transcriptEl.scrollTop = transcriptEl.scrollHeight;
   }
 
-  function addTranscriptWithTime(role: 'user' | 'agent', text: string, timeStr: string): void {
+  function addTranscriptWithTime(role: 'user' | 'agent', text: string, timeStr: string, attachments: ChatAttachment[] = []): void {
     const msg = document.createElement('div');
     msg.className = `msg ${role}`;
 
@@ -691,7 +693,8 @@ export function setupUI(): UIHandle {
     } else {
       bubble.textContent = text;
     }
-    content.appendChild(bubble);
+    if (text) content.appendChild(bubble);
+    renderAttachments(content, attachments);
 
     const time = document.createElement('div');
     time.className = 'msg-time';
@@ -701,7 +704,7 @@ export function setupUI(): UIHandle {
     msg.appendChild(content);
     transcriptEl.appendChild(msg);
 
-    messageLog.push({ role, text, time: timeStr });
+    messageLog.push({ role, text, time: timeStr, ...(attachments.length ? { attachments } : {}) });
   }
 
   function onNewChat(cb: () => void): void { newChatCallbacks.push(cb); }

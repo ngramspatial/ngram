@@ -95,6 +95,7 @@ class Input:
     images: list[dict[str, Any]] = field(default_factory=list)
     audio: list[dict[str, Any]] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
+    files: list[dict[str, Any]] = field(default_factory=list)
 
 
 def is_group_like_chat(inp: Input) -> bool:

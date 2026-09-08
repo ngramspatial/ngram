@@ -154,11 +154,14 @@ Return ONLY valid JSON — no markdown fences, no explanation."""
 def estimate_message_tokens(msg: dict[str, Any]) -> int:
     """Rough token estimate for a single message dict."""
     content = msg.get("content", "")
+    media_tokens = len(getattr(content, 'images', [])) * 1600
     if isinstance(content, list):
+        media_tokens += sum(1600 if block.get('type') in {'image_url', 'input_image'} else 8000
+                            if block.get('type') in {'input_file', 'file'} else 0 for block in content if isinstance(block, dict))
         content = gemma.stringify_content_blocks(content)
     tokens = max(1, len(str(content)) // _CHARS_PER_TOKEN) + 10
     # Image bytes are not text tokens. Reserve a conservative image allowance.
-    tokens += len(getattr(content, "images", [])) * 1600
+    tokens += media_tokens
     for tc in msg.get("tool_calls") or []:
         if isinstance(tc, dict):
             args = tc.get("function", {}).get("arguments", "")

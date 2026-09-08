@@ -14,7 +14,7 @@ RUN cp configs/entities/canary.example.yaml configs/entities/canary.yaml \
 
 # Bootstrap image Python (used when NGRAM_SKIP_VOLUME_VENV=1). Runtime uses volume venv via entrypoint.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates \
+    ca-certificates ffmpeg \
     && rm -rf /var/lib/apt/lists/* \
     && pip install --upgrade pip \
     && pip install ".[railway,api,full]" \
