@@ -7,6 +7,11 @@ export interface ProtocolMessage {
     /** Unique ID for correlating actions with completion events. */
     actionId?: string;
 }
+export interface WorldAction extends ProtocolMessage {
+    type: "action:world";
+    command: string;
+    payload?: Record<string, unknown>;
+}
 export interface SpeakAction extends ProtocolMessage {
     type: "action:speak";
     text: string;
@@ -298,7 +303,7 @@ export interface TerminalOutputAction extends ProtocolMessage {
     /** If true, clear all previous terminal content */
     clear?: boolean;
 }
-export type SpatialAction = InferenceStatusAction | ContextStatusAction | TurnCancelledAction | SpeakAction | EmoteAction | MoveToAction | LookAtAction | GestureAction | ShowPanelAction | HidePanelAction | SetModeAction | FollowAction | HighlightAction | GoIdleAction | SpawnAction | SetAgentStateAction | SpeakStreamStartAction | SpeakStreamDeltaAction | SpeakStreamEndAction | SpawnObjectAction | SpawnTextAction | SpawnImageAction | SpawnToyAction | RemoveObjectAction | ClearObjectsAction | DrawLineAction | DrawArrowAction | DrawAnnotationAction | ClearDrawingsAction | SetEnvironmentAction | SetLightingAction | SpawnParticlesAction | ClearEnvironmentAction | PlayAudioAction | StopAudioAction | PauseAudioAction | SetAudioVolumeAction | PlayYouTubeAction | ControlYouTubeAction | TerminalOutputAction | SpawnModelAction | UpdateAppPanelAction | SetBackgroundAction | OpenBrowserAction | ControlBrowserAction | GenerateMotionAction | PlayMotionClipAction | ErrorAction | RequestCaptureAction;
+export type SpatialAction = WorldAction | InferenceStatusAction | ContextStatusAction | TurnCancelledAction | SpeakAction | EmoteAction | MoveToAction | LookAtAction | GestureAction | ShowPanelAction | HidePanelAction | SetModeAction | FollowAction | HighlightAction | GoIdleAction | SpawnAction | SetAgentStateAction | SpeakStreamStartAction | SpeakStreamDeltaAction | SpeakStreamEndAction | SpawnObjectAction | SpawnTextAction | SpawnImageAction | SpawnToyAction | RemoveObjectAction | ClearObjectsAction | DrawLineAction | DrawArrowAction | DrawAnnotationAction | ClearDrawingsAction | SetEnvironmentAction | SetLightingAction | SpawnParticlesAction | ClearEnvironmentAction | PlayAudioAction | StopAudioAction | PauseAudioAction | SetAudioVolumeAction | PlayYouTubeAction | ControlYouTubeAction | TerminalOutputAction | SpawnModelAction | UpdateAppPanelAction | SetBackgroundAction | OpenBrowserAction | ControlBrowserAction | GenerateMotionAction | PlayMotionClipAction | ErrorAction | RequestCaptureAction;
 export interface SpatialContextSnapshot {
     version: "1.0";
     observedAt: number;
@@ -410,6 +415,8 @@ export interface ActionCompletedEvent extends ProtocolMessage {
     /** Accepted means execution was started, not that an async action finished. */
     status?: "accepted" | "completed" | "failed";
     error?: string;
+    /** Structured query data or the committed edit result from the renderer. */
+    result?: unknown;
     actionTimestamp: number;
 }
 export interface ShellReadyEvent extends ProtocolMessage {
@@ -460,7 +467,7 @@ export type NgramArWireMessage = SpatialAction | ShellEvent;
 // All messages are JSON over WebSocket.
 // ─── Protocol Version ────────────────────────────────────────────────────────
 // Bump MINOR for additive changes, MAJOR for breaking changes.
-export const PROTOCOL_VERSION = "1.1";
+export const PROTOCOL_VERSION = "1.2";
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 export function createAction(type, sessionId, data) {
     return {

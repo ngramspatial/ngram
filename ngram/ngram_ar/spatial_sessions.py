@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 import uuid
 from collections.abc import Awaitable, Callable
@@ -48,6 +49,8 @@ class SpatialSession:
         finally:
             self.pending.pop(action_id, None)
         status = result["status"]
+        if "result" in result:
+            return json.dumps({"status": status, "sessionId": self.session_id, "result": result["result"]}, ensure_ascii=False)
         detail = str(result.get("error") or "")[:300]
         if status == "accepted":
             detail = "surface accepted the request; completion is not confirmed"
@@ -61,7 +64,7 @@ class SpatialSession:
         if receipt is not None and not receipt.done() and status in {
             "accepted", "completed", "failed",
         }:
-            receipt.set_result({"status": status, "error": event.get("error")})
+            receipt.set_result({"status": status, "error": event.get("error"), **({"result": event["result"]} if "result" in event else {})})
 
     def close(self) -> None:
         self.connected = False

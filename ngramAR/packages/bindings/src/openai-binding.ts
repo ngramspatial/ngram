@@ -17,6 +17,17 @@ export class OpenAIBinding {
     systemPrompt = "";
     history = [];
     sceneAnchors = [];
+    proactiveCallback = null;
+    worldPending = new Map();
+    turnEpoch = 0;
+    turnController = null;
+    onProactiveAction(callback) { this.proactiveCallback = callback; }
+    cancelActiveTurn() {
+        this.turnEpoch++;
+        this.turnController?.abort();
+        for (const pending of this.worldPending.values()) { clearTimeout(pending.timeout); pending.reject(new Error('Turn cancelled')); }
+        this.worldPending.clear();
+    }
     constructor(config) {
         this.config = config;
         this.baseUrl = (config.baseUrl ?? "").replace(/\/+$/, "");
@@ -35,6 +46,7 @@ export class OpenAIBinding {
         this.history = [];
     }
     async stop() {
+        this.cancelActiveTurn();
         this.history = [];
     }
     async injectBehaviorPrompt(prompt, context) {
@@ -75,6 +87,17 @@ export class OpenAIBinding {
     async handleEvent(event) {
         const sid = event.sessionId;
         switch (event.type) {
+            case "event:action_completed": {
+                const pending = this.worldPending.get(event.completedActionId);
+                if (pending && event.status !== "accepted") {
+                    clearTimeout(pending.timeout); this.worldPending.delete(event.completedActionId);
+                    pending.resolve({ status: event.status, result: event.result, error: event.error });
+                }
+                return [];
+            }
+            case "event:cancel_turn":
+                this.cancelActiveTurn();
+                return [createAction('action:turn_cancelled', sid, { reason: 'user' })];
             case "event:user_speech":
                 return event.isFinal ? this.handleSpeech(event.text, sid) : [];
             case "event:user_proximity":
@@ -163,9 +186,18 @@ export class OpenAIBinding {
         ];
     }
     async handleSpeech(text, sessionId) {
+        this.cancelActiveTurn();
+        this.turnController = new AbortController();
+        const epoch = this.turnEpoch;
         this.addMessage({ role: "user", content: text, timestamp: Date.now() });
         const messages = this.buildMessages();
-        const response = await this.callApi(messages);
+        let response;
+        try { response = await this.callApi(messages); }
+        catch (error) { if (epoch !== this.turnEpoch) return []; throw error; }
+        if (epoch !== this.turnEpoch) return [];
+        if (response.choices[0]?.message.tool_calls?.some(tc => tc.function.name === 'world')) {
+            return this.handleWorldTurn(messages, response, sessionId, epoch);
+        }
         const choice = response.choices[0];
         if (!choice)
             return [];
@@ -226,6 +258,8 @@ export class OpenAIBinding {
             return [];
         }
         switch (name) {
+            case "world":
+                return [createAction('action:world', sessionId, { command: args.command, payload: args.payload ?? {} })];
             case "move_to": {
                 const target = args.target ?? "forward";
                 const speed = args.speed ?? "walk";
@@ -325,6 +359,46 @@ export class OpenAIBinding {
                 return [];
         }
     }
+    async worldRequest(action) {
+        if (!this.proactiveCallback) throw new Error('This adapter has no live renderer connection');
+        return new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => { this.worldPending.delete(action.actionId); reject(new Error('World confirmation timed out; execution unknown')); }, 8000);
+            this.worldPending.set(action.actionId, { resolve, reject, timeout });
+            try { this.proactiveCallback([action]); } catch (error) { clearTimeout(timeout); this.worldPending.delete(action.actionId); reject(error); }
+        });
+    }
+    async handleWorldTurn(messages, response, sessionId, epoch) {
+        const repeated = new Map();
+        for (let round = 0; round < 64 && epoch === this.turnEpoch; round++) {
+            const message = response.choices[0]?.message;
+            if (!message) return [];
+            const calls = message.tool_calls ?? [];
+            if (!calls.length) {
+                const text = message.content?.trim();
+                if (!text) return [];
+                this.addMessage({ role: 'agent', content: text, timestamp: Date.now() });
+                return [createAction('action:speak', sessionId, { text })];
+            }
+            messages.push(message);
+            for (const call of calls) {
+                if (epoch !== this.turnEpoch) return [];
+                const fingerprint = call.function.name + call.function.arguments;
+                const count = (repeated.get(fingerprint) ?? 0) + 1; repeated.set(fingerprint, count);
+                if (count > 3) return [createAction('action:speak', sessionId, { text: 'I stopped because the same spatial request kept repeating. The creation is available to inspect and adjust.' })];
+                let result;
+                try {
+                    const actions = this.resolveToolCall(call, sessionId);
+                    if (call.function.name === 'world') result = await this.worldRequest(actions[0]);
+                    else { this.proactiveCallback?.(actions); result = { status: 'accepted', detail: 'Completion not confirmed' }; }
+                } catch (error) { if (epoch !== this.turnEpoch) return []; result = { status: 'failed', error: String(error.message) }; }
+                messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(result) });
+            }
+            if (epoch !== this.turnEpoch) return [];
+            try { response = await this.callApi(messages); }
+            catch (error) { if (epoch !== this.turnEpoch) return []; throw error; }
+        }
+        return epoch === this.turnEpoch ? [createAction('action:speak', sessionId, { text: 'The spatial work reached this turn’s execution limit. The current creation has been kept.' })] : [];
+    }
     buildMessages() {
         const msgs = [
             { role: "system", content: this.buildSystemContent() },
@@ -362,6 +436,7 @@ export class OpenAIBinding {
                 Authorization: `Bearer ${this.apiKey}`,
             },
             body: JSON.stringify(body),
+            signal: this.turnController?.signal,
         });
         if (!res.ok) {
             const text = await res.text();

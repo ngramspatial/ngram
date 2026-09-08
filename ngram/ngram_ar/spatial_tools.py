@@ -61,6 +61,7 @@ _SCENE_OBJECT_SHAPES = frozenset({"cube", "sphere", "cylinder", "cone", "torus",
 _TOY_TYPES = frozenset({"ball", "bouncy_ball", "beach_ball", "dice", "marble"})
 _MOTION_ROOT_TARGETS = frozenset({"stationary", "user", "forward", "left", "right"})
 _SPATIAL_CAPABILITIES = (
+    "ar_world",
     "ar_inspect_surface",
     "ar_move_to",
     "ar_gesture",
@@ -771,7 +772,36 @@ _SCHEMA_MOTION: dict[str, Any] = {
 }
 
 
+async def _ar_world(command: str, payload: dict[str, Any] | None = None) -> str:
+    """Query and program the live world's authoritative renderer, from any chat."""
+    if not _spatial_available():
+        return "[spatial: unavailable; no connected Spatial session]"
+    if command not in {"capabilities", "observe", "apply", "events", "program", "pause", "resume", "save", "export", "import", "load", "fork", "undo", "redo", "workshop", "garden", "perform", "assets"}:
+        return "[spatial: invalid world command; call capabilities for the contract]"
+    if payload is not None and not isinstance(payload, dict):
+        return "[spatial: payload must be a JSON object]"
+    ctx = get_tool_runtime()
+    session = connected_spatial_session(ctx.entity, ctx.inp)
+    if session is None:
+        return "[spatial: world commands require a live renderer with result support]"
+    return await session.dispatch({"type": "action:world", "command": command, "payload": payload or {}})
+
+
 def register_ngram_ar_spatial_tools(registry: ToolRegistry) -> None:
+    registry.register_fn(
+        "ar_world",
+        "Create, inspect, edit and PROGRAM persistent spatial creations. Call command=capabilities first for the exact contract and JavaScript API. "
+        "Use observe for live object IDs, transforms, materials, physics, controls and program status; apply for validated batched geometry/material/group/body/joint edits; "
+        "program to install local JavaScript tick/event handlers with explicit entity IDs, parameters and state; events to poll human grabs, releases, control changes and collisions. "
+        "Programs and physics run locally with ZERO per-frame model calls. Human grabs take priority. Pause/resume controls creations. "
+        "Save/export/import/undo/redo manage worlds. Workshop builds an example kinetic machine using the same API. "
+        "Never poll continuously or loop merely to watch a creation; observe when needed, then end the turn. All coordinates are metres and radians.",
+        _ar_world,
+        parameters_schema={"type": "object", "properties": {
+            "command": {"type": "string", "enum": ["capabilities", "observe", "apply", "events", "program", "pause", "resume", "save", "export", "import", "load", "fork", "undo", "redo", "workshop", "garden", "perform", "assets"]},
+            "payload": {"type": "object", "description": "Command payload per capabilities. apply: {requestId,baseRevision?,operations:[...]}. program: {command:install,program:{id,source,entityIds,params,state}}. events: {after:cursor}."},
+        }, "required": ["command"]},
+    )
     registry.register_fn(
         "ar_inspect_surface",
         "Connected Spatial body (available from any chat) — inspect the current embodied surface contract, live context, "

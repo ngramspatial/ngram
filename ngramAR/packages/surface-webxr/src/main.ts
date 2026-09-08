@@ -39,6 +39,10 @@ import { BrowserViewer } from './browser-viewer.js';
 import { BehaviorSensorManager, type SensorContext } from './behavior-sensors.js';
 import { captureFrame, containsVisionTrigger } from './vision-capture.js';
 import { SceneObjectManager } from './scene-object-manager.js';
+import { CreationWorld } from './creation-world.js';
+import { CreationService } from './creation-service.js';
+import { CreationInput } from './creation-input.js';
+import { attachCreationStudio } from './creation-studio.js';
 import { DrawingManager } from './drawing-manager.js';
 import { EnvironmentManager } from './environment-manager.js';
 import { XRPointerManager } from './xr-pointer.js';
@@ -295,6 +299,52 @@ async function main() {
     if (controls) controls.enabled = !dragging;
   };
   await initPhysics();
+  const creationWorld = new CreationWorld(scene);
+  const creationService = new CreationService(creationWorld);
+  creationService.surfaceContext = () => buildSpatialContext();
+  creationService.legacyObjects = () => sceneObjects.getSavedState().map(item => ({
+    id: item.id, kind: item.kind, domain: 'legacy', position: item.params.position,
+    quaternion: item.params.quaternion, scale: item.params.groupScale,
+  }));
+  let creationPerformance: {id:string;target:string}|null = null;
+  creationService.cancelPerformance = () => {
+    const task = creationPerformance; creationPerformance = null;
+    if (!task) return;
+    avatar.walkTo(avatar.getPosition().clone(), 'walk', () => {});
+    creationWorld.store.emit('perform.cancelled', 'avatar', task.target, {taskId:task.id});
+  };
+  creationService.perform = (request) => {
+    if (!agentSpawned || !agentVisible) throw new Error('Avatar must be placed and visible');
+    const target = new THREE.Vector3(...request.position);
+    if (request.action === 'look') {
+      handleLookAt({target:{x:target.x,y:target.y,z:target.z}});
+      return {status:'completed',target:request.target,action:'look'};
+    }
+    creationService.cancelPerformance();
+    const current = avatar.getPosition(), delta = target.clone().sub(current); delta.y = 0;
+    const distance = delta.length();
+    const destination = current.clone().add(delta.normalize().multiplyScalar(Math.max(0,distance-.7)));
+    const task = {id:crypto.randomUUID(),target:request.target}; creationPerformance = task;
+    avatar.walkTo(destination,'walk',()=>{
+      if (creationPerformance !== task) return;
+      creationPerformance = null;
+      creationWorld.store.emit('perform.completed','avatar',task.target,{taskId:task.id,position:avatar.getPosition().toArray()});
+      scheduleSceneSave();
+    });
+    return {status:'accepted',taskId:task.id,target:task.target,destination:destination.toArray()};
+  };
+  const creationInput = new CreationInput(creationWorld, camera, renderer.domElement);
+  creationInput.onDrag = (dragging) => { if (controls) controls.enabled = !dragging; };
+  attachCreationStudio(creationService, creationInput, {
+    origin: () => { const p = avatar.getPosition(); return [p.x, p.y, p.z - 1.5]; },
+    focus: () => {
+      const bounds = new THREE.Box3().setFromObject(creationWorld.root);
+      if (bounds.isEmpty() || !controls) return;
+      const center = bounds.getCenter(new THREE.Vector3());
+      controls.target.copy(center); camera.position.copy(center).add(new THREE.Vector3(0, .45, Math.max(2.8, bounds.getSize(new THREE.Vector3()).length()))); controls.update();
+    },
+  });
+  await creationService.restore();
   highlights.attach(scene);
   spatialUI.attach(scene);
   agentState.attach(scene);
@@ -600,7 +650,8 @@ async function main() {
       scene: {
         anchors: [],
         anchorCount: 0,
-        objectCount: sceneObjects.getObjectCount(),
+        objectCount: sceneObjects.getObjectCount() + creationWorld.entries.size,
+        creations: { protocol: 'ngram.world/1', revision: creationWorld.store.document.revision, count: creationWorld.entries.size, paused: creationWorld.paused },
       },
     };
   }
@@ -716,6 +767,7 @@ async function main() {
   });
 
   ui.onSettingsClearObjects(() => {
+    creationInput.releaseAll(); creationService.clear();
     sceneObjects.clearAll();
     scheduleSceneSave();
   });
@@ -732,6 +784,7 @@ async function main() {
   });
 
   ui.onSettingsClearAll(() => {
+    creationInput.releaseAll(); creationService.clear();
     sceneObjects.clearAll();
     drawings.clearAll();
     envManager.clearEnvironment();
@@ -870,6 +923,7 @@ async function main() {
         handleAgentState(msg);
         break;
       case 'action:turn_cancelled':
+        void creationService.pause();
         if (contextDisplay.compacting) handleContextStatus({ phase: 'stopped' });
         clearResponsePlayback();
         clearMessagingIdleTimer();
@@ -957,9 +1011,11 @@ async function main() {
         });
         break;
       case 'action:remove_object':
+        if (creationWorld.entries.has(msg.objectId)) creationWorld.store.apply({requestId:msg.actionId??crypto.randomUUID(),operations:[{op:'entity.delete',id:msg.objectId}]});
         sceneObjects.remove(msg.objectId);
         break;
       case 'action:clear_objects':
+        creationService.clear();
         sceneObjects.clearAll();
         break;
 
@@ -1106,6 +1162,7 @@ async function main() {
   }
 
   connection.onMessage((msg: SpatialAction) => {
+    if (msg.type === 'action:world') { void creationService.dispatch(msg, event => connection.send(event)); return; }
     dispatchWithReceipt(msg, () => dispatchSpatialAction(msg), (event) => connection.send(event));
   });
 
@@ -1333,6 +1390,7 @@ async function main() {
 
   // --- Movement ---
   function handleMoveTo(msg: any) {
+    creationService.cancelPerformance();
     if (!agentSpawned || !agentVisible) {
       throw new Error('Cannot move: the avatar is not placed and visible.');
     }
@@ -1926,6 +1984,7 @@ async function main() {
     ui.hideSubtitle();
   }
   function stopResponse(): void {
+    void creationService.pause();
     clearResponsePlayback();
     responseControl.reset();
     connection.send({ type: 'event:cancel_turn' });
@@ -2810,7 +2869,7 @@ async function main() {
         handTracker.processFrame(frame, refSpace);
         wristMenu.processFrame(frame, refSpace, camera);
         xrPointers.update(frame, refSpace);
-        const pointers = xrPointers.getPointers();
+        const pointers = creationInput.updateXR(xrPointers.getPointers());
         panels.updateAR(pointers, camera);
         sceneObjects.updateAR(pointers);
         overlayBridge.updateAR(pointers, camera);
@@ -2819,6 +2878,8 @@ async function main() {
     }
 
     panels.update(camera, dt);
+    creationWorld.update(dt);
+    creationInput.update();
     sceneObjects.update(dt, camera);
     drawings.update(dt, camera);
     envManager.update(dt);

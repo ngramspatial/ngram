@@ -5,6 +5,15 @@
 // from these definitions. Add a new tool here → every binding gets it.
 export const SPATIAL_TOOL_DEFINITIONS = [
     {
+        name: "world",
+        description: "Inspect, build and program persistent spatial creations. Start with capabilities for the exact world and JavaScript API. observe returns live objects; apply commits batched geometry/material/physics/joint edits; program installs local tick/event handlers; events polls human interactions. Programs run locally without model calls. Do not repeatedly poll to watch a creation: finish the turn after building it.",
+        parameters: {
+            command: { type: "string", enum: ["capabilities", "observe", "apply", "events", "program", "pause", "resume", "save", "export", "import", "load", "fork", "undo", "redo", "workshop", "garden", "perform", "assets"], description: "World operation." },
+            payload: { type: "object", description: "Payload per capabilities. apply: {requestId,baseRevision?,operations}. program: {command:install,program:{id,source,entityIds,params,state}}." },
+        },
+        required: ["command"],
+    },
+    {
         name: "move_to",
         description: "Walk or move to a target. Use when asked to come closer, move away, walk somewhere, etc.",
         parameters: {
