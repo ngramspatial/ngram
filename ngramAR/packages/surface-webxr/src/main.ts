@@ -5,6 +5,7 @@ import { createScene } from './scene-setup.js';
 import { ConnectionManager } from './connection.js';
 import { dispatchWithReceipt } from './action-receipts.js';
 import { AvatarController } from './avatar.js';
+import { resolveMoveDestination } from './movement.js';
 import { SpeechHandler } from './speech.js';
 import { attachSlashCommands, parseSlashCommand, SLASH_COMMANDS, showCommandNotice } from './slash-commands.js';
 import { captionPages } from './speech-captions.js';
@@ -1332,35 +1333,24 @@ async function main() {
 
   // --- Movement ---
   function handleMoveTo(msg: any) {
-    if (!agentSpawned) return;
-    const { target, speed } = msg;
-    ambient.recordInteraction();
-
-    let dest: THREE.Vector3;
-    const pos = avatar.getPosition();
-
-    if (target === 'user') {
-      const dir = new THREE.Vector3().subVectors(camera.position, pos).normalize();
-      dest = pos.clone().add(dir.multiplyScalar(
-        Math.max(0.5, pos.distanceTo(camera.position) - 1.2)
-      ));
-      dest.y = pos.y;
-    } else if (typeof target === 'object' && target !== null) {
-      dest = new THREE.Vector3(
-        pos.x + (target.x ?? 0),
-        pos.y,
-        pos.z + (target.z ?? 0),
-      );
-    } else {
-      return;
+    if (!agentSpawned || !agentVisible) {
+      throw new Error('Cannot move: the avatar is not placed and visible.');
     }
+    const { target, speed } = msg;
+    const dest = resolveMoveDestination(target, avatar.getPosition(), camera.position);
+    ambient.recordInteraction();
 
     avatar.walkTo(dest, speed ?? 'walk', () => {
       scheduleSceneSave();
       connection.send({
         type: 'event:action_completed',
         action: 'move_to',
+        completedActionId: msg.actionId,
+        status: 'completed',
+        sessionId: connection.sessionId,
+        timestamp: Date.now(),
         actionTimestamp: msg.timestamp ?? Date.now(),
+        spatialContext: buildSpatialContext(),
       });
     });
   }

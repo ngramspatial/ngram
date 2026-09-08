@@ -24,7 +24,7 @@ export interface EmoteAction extends ProtocolMessage {
 }
 export interface MoveToAction extends ProtocolMessage {
     type: "action:move_to";
-    /** Named anchor ("desk", "user", "window") or coordinates */
+    /** user, left, right, forward, away, random; or a relative world-space x/z offset. */
     target: string | Vec3;
     speed?: "walk" | "fast" | "instant";
 }

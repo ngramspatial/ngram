@@ -304,8 +304,10 @@ export class AvatarController {
 
 const CROSSFADE_DURATION = 0.3;
 const WALK_ARRIVAL_DISTANCE = 0.015;
-const WALK_ACCELERATION = 3.5;
-const WALK_DECELERATION = 4.5;
+const WALK_SPEED = 2.0;
+const FAST_WALK_SPEED = 3.5;
+const WALK_ACCELERATION = 7.0;
+const WALK_DECELERATION = 9.0;
 const WALK_TURN_RATE = Math.PI * 3;
 const GESTURE_HOLD_MS = 8_000;
 const DANCE_GESTURE_HOLD_MS = 60_000;
@@ -352,7 +354,7 @@ class ModelAvatar implements AvatarBackend {
   private gazeWeight = 1;
   private isSpeaking = false;
   private walkTarget: THREE.Vector3 | null = null;
-  private walkSpeed = 1.0;
+  private walkSpeed = WALK_SPEED;
   private walkVelocity = 0;
   private walkArriveCallback: WalkCallback | null = null;
   private normalizedLocomotionClips = new Set<string>();
@@ -793,7 +795,7 @@ class ModelAvatar implements AvatarBackend {
 
     const wasWalking = this.walkTarget !== null;
     this.walkTarget = target.clone();
-    this.walkSpeed = speed === 'fast' ? 2.5 : 1.0;
+    this.walkSpeed = speed === 'fast' ? FAST_WALK_SPEED : WALK_SPEED;
     if (!wasWalking) this.walkVelocity = 0;
     this.walkArriveCallback = onArrive;
     this.playClip('walking');
