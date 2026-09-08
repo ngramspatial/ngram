@@ -16,10 +16,12 @@ class SpatialSession:
         session_id: str,
         send: Callable[[list[dict[str, Any]]], Awaitable[None]],
         context: Callable[[], dict[str, Any]],
+        shell_slug: str = "",
     ) -> None:
         self.session_id = session_id
         self.send = send
         self.context = context
+        self.shell_slug = shell_slug
         self.connected = True
         self.pending: dict[str, asyncio.Future[dict[str, Any]]] = {}
 

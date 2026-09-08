@@ -16,6 +16,7 @@ import { resolvengramBinding } from "./resolve-ngram-binding.js";
 import { isngramEntityBinding, resolveEntityBridgeConfig } from "./resolve-entity-bridge.js";
 import { buildArCognitionContextMarkdown } from "./ar-cognition-context.js";
 import { MotionProviderClient } from "./motion-provider.js";
+import { proxyBlender } from './blender-proxy.js';
 import { VOICE_PROVIDERS, loadVoiceConfig, normalizeVoiceConfig, publicVoiceConfig, saveVoiceConfig, voiceEnvironmentKey } from './voice-config.js';
 import {
     BRAIN_PROVIDERS,
@@ -215,6 +216,18 @@ export class NgramArServer {
         }
         const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
         const pathname = decodeURIComponent(url.pathname);
+        const blenderMatch = pathname.match(/^\/api\/shells\/([a-z0-9-]+)\/blender\/(.+)$/);
+        if (blenderMatch) {
+            try {
+                const shell = await loadShellDefinition(join(resolve(this.options.shellsDir), blenderMatch[1]));
+                if (!isngramEntityBinding(shell.binding)) throw Error('No entity execution host');
+                return await proxyBlender(req, res, resolveEntityBridgeConfig(shell.binding), blenderMatch[2]);
+            } catch {
+                res.writeHead(404, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ ok: false, error: 'No Blender bridge for this agent' }));
+                return;
+            }
+        }
         if (pathname === '/api/voice' || pathname === '/api/voice/preview') {
             return this.handleVoiceSettings(req, res, pathname.endsWith('/preview'));
         }

@@ -301,6 +301,7 @@ async function main() {
   await initPhysics();
   const creationWorld = new CreationWorld(scene);
   const creationService = new CreationService(creationWorld);
+  creationService.blender.origin = () => { const p = avatar.getPosition(); return [p.x, p.y, p.z - 1.5]; };
   creationService.surfaceContext = () => buildSpatialContext();
   creationService.legacyObjects = () => sceneObjects.getSavedState().map(item => ({
     id: item.id, kind: item.kind, domain: 'legacy', position: item.params.position,

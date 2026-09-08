@@ -27,7 +27,7 @@ export function disposeCreationAsset(node) {
 
 export async function loadCreationAsset(asset, signal, onProgress) {
   const maxBytes = 32 * 1024 * 1024;
-  const response = await fetch(asset.url, { signal, credentials: "omit" });
+  const response = await fetch(asset.url, { signal, credentials: "same-origin" });
   if (!response.ok) throw Error(`Asset request failed (${response.status})`);
   const total = Number(response.headers.get("content-length")) || 0;
   if (total > maxBytes) {
@@ -132,8 +132,9 @@ export async function loadCreationAsset(asset, signal, onProgress) {
   }
   const container = new THREE.Group();
   const center = box.getCenter(new THREE.Vector3());
-  gltf.scene.position.sub(center);
+  if (asset.normalize !== false) gltf.scene.position.sub(center);
   container.add(gltf.scene);
-  container.scale.setScalar(asset.fit / dimension);
+  container.scale.setScalar(asset.normalize === false ? asset.fit : asset.fit / dimension);
+  container.userData.animationClips = gltf.animations;
   return container;
 }

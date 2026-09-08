@@ -5,62 +5,66 @@ export function attachCreationStudio(
   input,
   { origin = () => [0, 0, -1.5], focus = () => {} } = {},
 ) {
-  const style = document.createElement("style");
-  style.textContent = `
-  #creation-studio{position:fixed;left:calc(var(--sidebar-w,275px) + 18px);top:65px;z-index:35;font-family:'Azeret Mono',monospace;font-size:11px;color:#151728;max-width:calc(100vw - 36px)}
-  body.sidebar-collapsed #creation-studio,body.ar-active #creation-studio{left:18px}
-  #creation-studio *{box-sizing:border-box;font-family:inherit}
-  #creation-studio button{font-size:11px;font-weight:600;cursor:pointer;border:1.5px solid #202439;border-radius:7px;background:#fff;color:#202439;box-shadow:3px 3px 0 #202439;padding:8px 11px;transition:transform .12s,box-shadow .12s}
-  #creation-studio button:hover{transform:translate(-1px,-1px);box-shadow:4px 4px 0 #202439}
-  #creation-studio button:active{transform:translate(2px,2px);box-shadow:1px 1px 0 #202439}
-  #creation-studio button:focus-visible,#creation-studio input:focus-visible,#creation-studio textarea:focus-visible{outline:3px solid #6E7DFF;outline-offset:3px}
-  #creation-studio .primary{background:#6E7DFF;color:white}#creation-studio .row{display:flex;gap:9px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
-  #creation-studio .body{margin-top:12px;width:310px;max-width:100%;max-height:calc(100dvh - 220px);overflow:auto;padding:18px;border:1px solid #D9DDF4;background:#F8F9FF;box-shadow:0 16px 48px #14183525;border-radius:16px}
-  #creation-studio .body[hidden]{display:none}#creation-studio h2{font-size:16px;letter-spacing:-.7px;margin:0 0 8px}#creation-studio p{line-height:1.6;margin:8px 0 14px}
-  #creation-studio .muted{color:#555C79}#creation-studio hr{border:0;border-top:1px solid #D9DDF4;margin:18px 0}
-  #creation-studio label{display:block;margin:10px 0 5px}#creation-studio input,#creation-studio select,#creation-studio textarea{color:#202439;background:white;border:1px solid #C5CAE4;border-radius:6px;padding:7px;width:100%;font-size:11px}
-  #creation-studio input[type=color]{height:36px;padding:2px}#creation-studio textarea{min-height:160px;resize:vertical;tab-size:2}#creation-studio .objects{display:grid;gap:7px;max-height:160px;overflow:auto;padding:2px 5px 6px 0}
-  #creation-studio .objects button{text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#creation-studio .objects button[aria-pressed=true]{background:#E0E4FF;border-color:#6E7DFF}
-  #creation-studio .axes{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}#creation-studio .status{max-width:270px;overflow-wrap:anywhere;font-size:10px;line-height:1.6}
-  @media(max-width:600px){#creation-studio{top:78px;left:12px}.body{max-height:55dvh!important}}
-  `;
-  document.head.append(style);
   const root = document.createElement("section");
   root.id = "creation-studio";
-  root.setAttribute("aria-label", "Creation studio");
+  root.className = "context-drawer";
+  root.hidden = true;
+  root.setAttribute("aria-label", "Objects");
   const make = (tag, text, parent = root) => {
     const e = document.createElement(tag);
+    if (["input", "select", "textarea"].includes(tag)) e.className = "modal-input";
+    if (tag === "label") e.className = "modal-label";
     if (text) e.textContent = text;
     parent.append(e);
     return e;
   };
-  const toolbar = make("div");
+  const header = make("div");
+  header.className = "drawer-header";
+  make("h2", "Objects", header).className = "drawer-shell-name";
+  const body = make("div");
+  body.className = "body";
+  const toolbar = make("div", null, body);
   toolbar.className = "row";
   const button = (label, fn, parent = toolbar, primary = false) => {
     const b = make("button", label, parent);
     b.type = "button";
-    if (primary) b.className = "primary";
+    b.className = primary ? "modal-btn modal-btn-primary" : "modal-btn";
     b.onclick = () => run(fn);
     return b;
   };
   let opened = false;
-  const open = button("Creations", () => {
-    opened = !opened;
-    body.hidden = !opened;
+  const open = document.createElement("button");
+  open.type = "button";
+  open.className = "topbar-btn";
+  open.setAttribute("aria-label", "Objects");
+  open.title = "Objects";
+  open.setAttribute("aria-controls", root.id);
+  open.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 2 9 5v10l-9 5-9-5V7l9-5Zm0 2.3L6 7.6l6 3.3 6-3.3-6-3.3Zm-7 5v6.5l6 3.4v-6.5l-6-3.4Zm8 9.9 6-3.4V9.3l-6 3.4v6.5Z"/></svg>';
+  document.querySelector('.topbar-actions')?.prepend(open);
+  function setOpen(value) {
+    opened = value;
+    root.hidden = !opened;
+    root.classList.toggle("open", opened);
+    open.classList.toggle("active", opened);
     open.setAttribute("aria-expanded", String(opened));
+    if (opened) document.getElementById('context-drawer')?.classList.remove('open');
     refresh();
-  });
+  }
+  open.onclick = () => setOpen(!opened);
   open.setAttribute("aria-expanded", "false");
+  const close = button("Close", () => { setOpen(false); open.focus(); }, header);
+  close.className = 'drawer-close';
+  close.setAttribute('aria-label', 'Close objects');
+  close.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6.4 5 5.6 5.6L17.6 5 19 6.4 13.4 12l5.6 5.6-1.4 1.4-5.6-5.6L6.4 19 5 17.6l5.6-5.6L5 6.4 6.4 5Z"/></svg>';
+  document.getElementById('drawer-toggle')?.addEventListener('click', () => setOpen(false));
+  root.addEventListener('keydown', e => { if (e.key === 'Escape') { setOpen(false); open.focus(); } });
   const pause = button("Pause creations", async () =>
     service.world.paused ? service.resume() : service.pause(),
   );
-  const body = make("div");
-  body.className = "body";
-  body.hidden = true;
-  make("h2", "Make something move.", body);
-  make("p", "Grab it. Change it. Let it keep running.", body).className =
-    "muted";
-  const intro = make("div", null, body);
+  button("Focus", focus, toolbar);
+  const examples = make("details", null, body);
+  make("summary", "Examples", examples);
+  const intro = make("div", null, examples);
   intro.className = "row";
   button(
     "Kinetic workshop",
@@ -82,18 +86,19 @@ export function attachCreationStudio(
     intro,
     true,
   );
-  button("Focus", focus, intro);
   const history = make("div", null, body);
   history.className = "row";
   button("Undo", () => service.handle("undo"), history);
   button("Redo", () => service.handle("redo"), history);
-  const status = make("p", "Ready to create.", body);
+  const status = make("p", "Select an object to inspect it.", body);
   status.className = "status";
   status.setAttribute("role", "status");
   status.id = "creation-status";
   const list = make("div", null, body);
   list.className = "objects";
   list.setAttribute("aria-label", "World objects");
+  const empty = make("p", "Ask your agent to build something. Blender projects, shapes, and interactive creations appear here.", body);
+  empty.className = 'muted';
   const createRow = make("div", null, body);
   createRow.className = "row";
   for (const [label, shape] of [
@@ -218,6 +223,21 @@ export function attachCreationStudio(
     actions.className = "row";
     actions.style.marginTop = "14px";
     if (e.asset) {
+      const project = service.blender.forEntity(id);
+      if (project) {
+        const live = service.blender.inspect(project);
+        make('p', `Blender · revision ${live.displayedRevision ?? 'loading'}${live.pending ? ' · update queued' : ''}${project.paused ? ' · updates paused' : ''}`, inspector).className = 'muted';
+        if (project.error) make('p', project.error, inspector).className = 'status';
+        button(project.paused ? 'Resume updates' : 'Pause updates', () => service.blender.command(id, project.paused ? 'resume' : 'pause'), actions);
+        button('Refresh project', () => service.blender.command(id, 'refresh'), actions);
+        button('Stop Blender', () => service.blender.command(id, 'stop'), actions);
+        for (const [title, filename] of [['Download .blend', 'project.blend'], ['Download GLB', 'preview.glb']]) {
+          const link = make('a', title, actions);
+          link.className = 'modal-btn';
+          link.href = `${project.base}/${project.revision}/${filename}`;
+          link.download = filename;
+        }
+      }
       make(
         "p",
         e.status === "failed" ? `Load failed: ${e.error}` : `Asset ${e.status}`,
@@ -351,6 +371,7 @@ export function attachCreationStudio(
       : "Pause creations";
     if (service.storageError) status.textContent = service.storageError;
     const entries = service.world.store.document.entities;
+    empty.hidden = entries.length > 0;
     const signature = JSON.stringify([
       entries.map((e) => [
         e.id,
@@ -359,9 +380,11 @@ export function attachCreationStudio(
       ]),
       input.selected,
       service.programs.inspect().map((p) => [p.id, p.status, p.error]),
+      service.blender.list().map(p => [p.id, p.revision, p.pending, p.paused, p.state, p.error]),
     ]);
     if (signature !== lastSignature) {
       lastSignature = signature;
+      if (input.selected && !inspector.contains(document.activeElement)) inspect(input.selected);
       list.replaceChildren();
       for (const e of entries) {
         const b = button(
@@ -438,6 +461,7 @@ export function attachCreationStudio(
   };
   input.onSelect = () => {
     inspect(input.selected);
+    if (input.selected) setOpen(true);
     refresh();
   };
   document.body.append(root);

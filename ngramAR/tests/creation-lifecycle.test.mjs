@@ -186,7 +186,7 @@ test("XR two-hand manipulation and asset replacement operate through the real re
         },
       ],
     });
-    const first = world.entries.get("model"),
+    const first = world.entries.get("model").abort,
       loaded = waitEvent("asset.ready", "model");
     world.store.apply({
       requestId: "replace",
@@ -198,7 +198,7 @@ test("XR two-hand manipulation and asset replacement operate through the real re
         },
       ],
     });
-    assert.equal(first.abort.signal.aborted, true);
+    assert.equal(first.signal.aborted, true);
     await loaded;
     assert.equal(world.sample("model").ready, true);
     assert.ok(
@@ -209,6 +209,8 @@ test("XR two-hand manipulation and asset replacement operate through the real re
       ) < 0.001,
     );
     const failed = waitEvent("asset.failed", "model");
+    const visible = world.entries.get('model').visual;
+    const placement = world.sample('model').transform;
     world.store.apply({
       requestId: "invalid",
       operations: [
@@ -221,6 +223,8 @@ test("XR two-hand manipulation and asset replacement operate through the real re
     });
     await failed;
     assert.equal(world.sample("model").status, "failed");
+    assert.equal(world.entries.get('model').visual, visible, 'Failed live update retains the previous mesh');
+    assert.deepEqual(world.sample('model').transform, placement, 'Updates retain the human placement');
     world.store.apply({
       requestId: "remove",
       operations: [{ op: "entity.delete", id: "model" }],

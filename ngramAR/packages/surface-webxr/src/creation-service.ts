@@ -3,6 +3,7 @@ import { WORLD_API_HELP, WorldStore, identifier } from "@ngram-ar/core";
 import { CreationPrograms, PROGRAM_API_HELP } from "./creation-programs.js";
 import { kineticWorkshop } from "./kinetic-workshop.js";
 import { resonanceGarden } from "./resonance-garden.js";
+import { BlenderProjects } from './blender-projects.js';
 
 const STORAGE_KEY = "ngram_creation_worlds_v1";
 /** Transport-neutral actions. No action/event here initiates model inference. */
@@ -20,6 +21,7 @@ export class CreationService {
   constructor(world) {
     this.world = world;
     this.programs = new CreationPrograms(world);
+    this.blender = new BlenderProjects(this);
     const changed = () => {
       this.onChange?.();
       if (!this.saveTimer)
@@ -56,6 +58,7 @@ export class CreationService {
     return {
       world: this.world.store.checkpoint(),
       programs: this.programs.export(),
+      blender: this.blender.export(),
     };
   }
   save(name?) {
@@ -83,6 +86,9 @@ export class CreationService {
     // Validate the complete import before pausing or replacing the user's world.
     const checked = new WorldStore({ commit() {} });
     checked.restore(doc.world, "validation", false);
+    if (doc.blender !== undefined && (!Array.isArray(doc.blender) || doc.blender.length > 8))
+      throw Error('Invalid Blender project links');
+    for (const link of doc.blender ?? []) this.blender.validate(link);
     const validationPrograms = new CreationPrograms({
       entries: new Map(checked.document.entities.map((e) => [e.id, e])),
       store: checked,
@@ -101,6 +107,7 @@ export class CreationService {
     await this.programs.command("remove");
     for (const p of doc.programs)
       await this.programs.install(p, { start: false });
+    this.blender.restore(doc.blender);
   }
   async pause() {
     this.cancelPerformance?.();
@@ -114,6 +121,7 @@ export class CreationService {
     if (this.world.store.locks.size)
       throw Error("Release grabbed objects before clearing creations");
     this.cancelPerformance?.();
+    this.blender.clear();
     void this.programs.command("remove");
     this.world.store.restore({
       ...this.world.store.document,
@@ -135,6 +143,7 @@ export class CreationService {
           ...WORLD_API_HELP,
           programs: PROGRAM_API_HELP,
           features: {
+            blenderPreviews: true,
             physics: true,
             customMeshes: true,
             instancing: true,
@@ -156,7 +165,10 @@ export class CreationService {
           performance: { ...this.world.metrics },
           surface: this.surfaceContext?.(),
           legacyObjects: this.legacyObjects?.(),
+          blender: this.blender.list(),
         };
+      case 'blender':
+        return this.blender.attach(payload);
       case "perform": {
         if (!this.perform) throw Error("This surface has no avatar performer");
         if (!["look", "approach"].includes(payload.action))

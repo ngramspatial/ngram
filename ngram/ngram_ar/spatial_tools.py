@@ -61,6 +61,7 @@ _SCENE_OBJECT_SHAPES = frozenset({"cube", "sphere", "cylinder", "cone", "torus",
 _TOY_TYPES = frozenset({"ball", "bouncy_ball", "beach_ball", "dice", "marble"})
 _MOTION_ROOT_TARGETS = frozenset({"stationary", "user", "forward", "left", "right"})
 _SPATIAL_CAPABILITIES = (
+    "ar_blender",
     "ar_world",
     "ar_inspect_surface",
     "ar_move_to",
@@ -788,6 +789,8 @@ async def _ar_world(command: str, payload: dict[str, Any] | None = None) -> str:
 
 
 def register_ngram_ar_spatial_tools(registry: ToolRegistry) -> None:
+    from ngram.ngram_ar.blender_tools import register_blender_tools
+    register_blender_tools(registry)
     registry.register_fn(
         "ar_world",
         "Create, inspect, edit and PROGRAM persistent spatial creations. Call command=capabilities first for the exact contract and JavaScript API. "

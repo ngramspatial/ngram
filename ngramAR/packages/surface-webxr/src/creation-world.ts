@@ -139,6 +139,10 @@ export class CreationWorld {
     };
   }
   private startAsset(entry) {
+    entry.abort?.abort();
+    entry.status = "loading";
+    entry.error = null;
+    entry.progress = null;
     const controller = new AbortController();
     entry.abort = controller;
     loadCreationAsset(entry.spec.asset, controller.signal, (progress) => {
@@ -162,6 +166,15 @@ export class CreationWorld {
           }
         });
         entry.visual = visual;
+        entry.mixer?.stopAllAction();
+        entry.mixer?.uncacheRoot(entry.mixer.getRoot());
+        entry.mixer = null;
+        const clips = visual.userData.animationClips;
+        if (clips?.length) {
+          entry.mixer = new THREE.AnimationMixer(visual);
+          // Multiple authored actions are alternatives; start the first clip.
+          entry.mixer.clipAction(clips[0]).play();
+        }
         if (!entry.spec.asset.preserveMaterials) this.applyMaterial(entry);
         entry.node.add(visual);
         entry.status = "ready";
@@ -300,6 +313,8 @@ export class CreationWorld {
     const entry = this.entries.get(id);
     if (!entry) return;
     entry.abort?.abort();
+    entry.mixer?.stopAllAction();
+    entry.mixer?.uncacheRoot(entry.mixer.getRoot());
     if (entry.body?.isValid()) getWorld().removeRigidBody(entry.body);
     // Child entities own their resources and will be reparented by the commit.
     for (const child of [...entry.node.children])
@@ -425,6 +440,7 @@ export class CreationWorld {
   }
   private commit(before, after, effects) {
     const changedBodies = new Set();
+    const changedAssets = new Set();
     for (const e of after.entities) {
       const old = this.entries.get(e.id)?.spec;
       const assetChanged =
@@ -432,8 +448,10 @@ export class CreationWorld {
           ? old.asset.url !== e.asset.url ||
             old.asset.format !== e.asset.format ||
             old.asset.fit !== e.asset.fit ||
+            old.asset.normalize !== e.asset.normalize ||
             (!old.asset.preserveMaterials && e.asset.preserveMaterials)
           : !equal(old?.asset, e.asset);
+      if (old?.asset && e.asset && assetChanged) changedAssets.add(e.id);
       const dynamicGeometry =
         old &&
         !e.physics &&
@@ -445,7 +463,7 @@ export class CreationWorld {
         old.geometry.vertices?.length === e.geometry.vertices?.length;
       if (
         !old ||
-        assetChanged ||
+        (assetChanged && !(old?.asset && e.asset)) ||
         (!dynamicGeometry && !equal(old.geometry, e.geometry)) ||
         !equal(old.physics, e.physics) ||
         (e.physics && !equal(old.transform.scale, e.transform.scale))
@@ -523,7 +541,12 @@ export class CreationWorld {
           entry.body.setAngvel(angularVelocity, true);
         }
         if (e.asset) this.startAsset(entry);
-      } else this.updateEntry(entry, e);
+      } else {
+        this.updateEntry(entry, e);
+        // Keep the previous visible mesh and live placement until the newest
+        // revision finishes loading. Aborted/failed loads never blank the object.
+        if (changedAssets.has(e.id)) this.startAsset(entry);
+      }
     }
     for (const e of after.entities) {
       const node = this.entries.get(e.id).node;
@@ -694,6 +717,7 @@ export class CreationWorld {
     this.metrics.instances = 0;
     for (const [id, e] of this.entries) {
       this.metrics.instances += e.spec.geometry.instances?.length ?? 0;
+      if (!this.paused) e.mixer?.update(Math.min(dt, 0.1));
       if (!e.body) continue;
       this.metrics.physicsBodies++;
       if (

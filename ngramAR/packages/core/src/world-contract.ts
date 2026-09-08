@@ -67,6 +67,7 @@ export interface WorldEntity {
     format: "glb" | "image";
     fit: number;
     preserveMaterials: boolean;
+    normalize: boolean;
   } | null;
 }
 export interface WorldJoint {
@@ -306,7 +307,7 @@ export function parseEntity(value: unknown): WorldEntity {
   let asset: WorldEntity["asset"] = null;
   if (kind === "asset") {
     const a = record(v.asset, "asset");
-    keys(a, ["url", "format", "fit", "preserveMaterials"], "asset");
+    keys(a, ["url", "format", "fit", "preserveMaterials", "normalize"], "asset");
     const url = text(a.url, "", 2048);
     if (!/^https?:\/\//i.test(url) && !/^\/(?!\/)/.test(url))
       throw new Error("Assets require HTTP(S) or a root-relative URL");
@@ -320,6 +321,7 @@ export function parseEntity(value: unknown): WorldEntity {
       format: choice(a.format, ["glb", "image"], "glb"),
       fit: number(a.fit, 1, 0.001, 100),
       preserveMaterials: bool(a.preserveMaterials, v.material === undefined),
+      normalize: bool(a.normalize, true),
     };
   } else if (v.asset != null)
     throw new Error("Only asset entities accept asset properties");

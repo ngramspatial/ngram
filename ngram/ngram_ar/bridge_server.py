@@ -607,6 +607,7 @@ async def websocket_handler(request: web.Request) -> web.WebSocketResponse:
         if spatial_session is None and bridge_session_id:
             spatial_session = SpatialSession(
                 bridge_session_id, send_body_actions, lambda: dict(spatial_context),
+                shell_slug=shell_slug,
             )
             entity._ngram_ar_sessions.register(spatial_session)
 
@@ -1075,6 +1076,8 @@ async def create_bridge_app(entity: Entity) -> web.Application:
 
     app.on_cleanup.append(close_activity_hub)
     app.router.add_get("/health", health_handler)
+    from ngram.ngram_ar.blender_routes import register_blender_routes
+    register_blender_routes(app, _check_token)
     app.router.add_get("/", websocket_handler)
     return app
 

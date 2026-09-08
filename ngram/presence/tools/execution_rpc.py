@@ -289,6 +289,9 @@ class ExecutionRPCClient:
             res = await self._call_http(action, payload)
             if res.get("ok"):
                 return res
+            # A persistent project must never silently migrate to another computer.
+            if action == "blender":
+                return res
             if self.allow_local_backend and (
                 should_fallback_rpc_to_local(res) or _rpc_error_suggests_unknown_action(res)
             ):
@@ -350,6 +353,9 @@ class ExecutionRPCClient:
 
     def _call_local(self, action: str, payload: dict[str, Any]) -> dict[str, Any]:
         try:
+            if action == "blender":
+                from ngram.presence.tools.blender_runtime import runtime_for
+                return runtime_for(self.workspace_root).command(payload)
             if action == "get_execution_context":
                 return {"ok": True, "environment": self.environment().__dict__}
 
