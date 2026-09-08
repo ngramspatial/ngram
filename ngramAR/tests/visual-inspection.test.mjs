@@ -78,6 +78,21 @@ test('XR current view uses the headset eye, with no camera mutation', async () =
   assert.deepEqual(eye.position.toArray(), [1,2,3]);
 });
 
+test('isolation keeps children renderable and restores renderer state even after a GPU failure', () => {
+  const {inspection,world,camera,scene} = fixture();
+  const parent=world.entries.get('sword').node, child=parent.clone();parent.add(child);
+  const state={target:null,viewport:[1,2,640,480],scissor:[3,4,400,300],scissorTest:true};
+  const renderer={xr:{enabled:true},autoClear:false,
+    getRenderTarget:()=>state.target,getViewport:v=>v.fromArray(state.viewport),getScissor:v=>v.fromArray(state.scissor),getScissorTest:()=>state.scissorTest,
+    setRenderTarget:v=>state.target=v,setViewport:(...v)=>state.viewport=v.length===1?v[0].toArray():v,setScissor:v=>state.scissor=v.toArray(),setScissorTest:v=>state.scissorTest=v,
+    render:()=>{assert.equal(parent.layers.mask,0);assert.equal(child.layers.mask,1);assert.equal(parent.visible,true);throw Error('GPU failure');}};
+  inspection.renderer=renderer;delete inspection.render;
+  const before=structuredClone(state),background=scene.background;
+  assert.throws(()=>inspection.render(camera,m.inspectionOptions({target:'sword',isolate:true}),[child]),/GPU failure/);
+  assert.deepEqual(state,before);assert.equal(parent.layers.mask,1);assert.equal(child.layers.mask,1);
+  assert.equal(renderer.xr.enabled,true);assert.equal(renderer.autoClear,false);assert.equal(scene.background,background);
+});
+
 test('direct binding awaits images then makes exactly one follow-up, with options preserved', async () => {
   const binding = new OpenAIBinding({baseUrl:'https://example.invalid',apiKey:'test',model:'test'});
   const calls = [], actions = [];

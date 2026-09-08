@@ -124,13 +124,15 @@ export class VisualInspection {
     const previous = { target: r.getRenderTarget(), viewport: r.getViewport(new THREE.Vector4()), scissor: r.getScissor(new THREE.Vector4()),
       scissorTest: r.getScissorTest(), xr: r.xr.enabled, autoClear: r.autoClear, background: scene.background, fog: scene.fog,
       environment: scene.environment, override: scene.overrideMaterial };
-    const hidden = [], temporary = [], cleanup = [];
+    const hidden = [], layers = [], temporary = [], cleanup = [];
+    let colliderScene = null;
     try {
       r.xr.enabled = false;
       if (options.isolate) {
         const keep = new Set(); roots.forEach(root => root.traverse(n => keep.add(n)));
         scene.traverse(n => {
-          if ((n.isMesh || n.isLine || n.isPoints || n.isSprite) && !keep.has(n)) { hidden.push([n, n.visible]); n.visible = false; }
+          // Layer masks hide a parent mesh without hiding a selected child node.
+          if ((n.isMesh || n.isLine || n.isPoints || n.isSprite) && !keep.has(n)) { layers.push([n, n.layers.mask]); n.layers.mask = 0; }
         });
       }
       if (options.style !== 'scene') {
@@ -156,12 +158,14 @@ export class VisualInspection {
           geometry.setAttribute('position', new THREE.BufferAttribute(data.vertices, 3));
           const material = new THREE.LineBasicMaterial({ color: '#6e7dff', depthTest: false });
           const lines = new THREE.LineSegments(geometry, material); lines.renderOrder = 10000;
-          temporary.push(lines); cleanup.push(geometry,material); scene.add(lines);
+          colliderScene = new THREE.Scene(); colliderScene.add(lines);
+          cleanup.push(geometry,material);
         }
       }
       r.xr.enabled = false; r.autoClear = true;
       r.setRenderTarget(target); r.setViewport(0,0,width,height); r.setScissorTest(false);
       r.render(scene, camera);
+      if (colliderScene) { r.autoClear = false; r.render(colliderScene, camera); }
       const bytes = new Uint8Array(width * height * 4);
       r.readRenderTargetPixels(target,0,0,width,height,bytes);
       const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height;
@@ -171,6 +175,7 @@ export class VisualInspection {
       return canvas.toDataURL('image/jpeg',.88);
     } finally {
       for (const [node, visible] of hidden) node.visible = visible;
+      for (const [node, mask] of layers) node.layers.mask = mask;
       temporary.forEach(n => scene.remove(n)); cleanup.forEach(n => n.dispose());
       scene.background = previous.background; scene.environment = previous.environment; scene.fog = previous.fog; scene.overrideMaterial = previous.override;
       r.setRenderTarget(previous.target); r.setViewport(previous.viewport); r.setScissor(previous.scissor); r.setScissorTest(previous.scissorTest);
