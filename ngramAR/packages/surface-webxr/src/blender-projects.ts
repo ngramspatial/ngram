@@ -22,6 +22,13 @@ export class BlenderProjects {
     const p = this.validate(payload);
     const key = p.base;
     let record = this.records.get(key);
+    // Host status/Stop may update an existing link, but cannot create a new object.
+    if (payload.stateOnly) {
+      if (!record) return { projectId: p.projectId, state: p.state, attached: false };
+      record.state = p.state ?? record.state;
+      this.service.onChange?.();
+      return this.inspect(record);
+    }
     if (record) record.state = p.state ?? record.state;
     if (record && p.revision <= Math.max(record.revision, record.pending?.revision ?? 0)) {
       this.service.onChange?.();

@@ -41,6 +41,7 @@ async def ar_blender(command: str, payload: dict[str, Any] | None = None) -> str
         preview_result = await session.dispatch({"type": "action:world", "command": "blender", "payload": {
             "projectId": project, "name": snapshot.get("name"), "revision": revision,
             "base": base, "position": args.get("position"), "state": snapshot.get("state"),
+            "stateOnly": command in {"stop", "status"},
         }})
         last_revision = revision
         last_state = snapshot.get("state")
@@ -48,7 +49,7 @@ async def ar_blender(command: str, payload: dict[str, Any] | None = None) -> str
     try:
         result = await client.call("blender", args)
         project = result.get("project_id") or project
-        if project and command in {"execute", "publish", "show"}:
+        if project and command in {"execute", "publish", "show", "stop", "status"}:
             await show(result)
         # This is transport progress, not an agent polling turn. No model calls.
         while result.get("ok") and result.get("state") == "working" and command in {"execute", "publish"}:

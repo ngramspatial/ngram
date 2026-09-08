@@ -101,6 +101,7 @@ async def test_live_preview_uses_connected_shell_and_preserves_position(monkeypa
     replies = iter([
         {'ok': True, 'project_id': 'sculpture', 'name': 'Sculpture', 'job_id': 'edit', 'state': 'working', 'snapshot': {'revision': 1}},
         {'ok': True, 'project_id': 'sculpture', 'name': 'Sculpture', 'job_id': 'edit', 'state': 'ready', 'snapshot': {'revision': 2}},
+        {'ok': True, 'project_id': 'sculpture', 'name': 'Sculpture', 'job_id': 'edit', 'state': 'stopped', 'snapshot': {'revision': 2}},
     ])
     call = AsyncMock(side_effect=lambda *a: next(replies))
     monkeypatch.setattr('ngram.ngram_ar.blender_tools.get_execution_client', lambda: SimpleNamespace(call=call))
@@ -113,10 +114,14 @@ async def test_live_preview_uses_connected_shell_and_preserves_position(monkeypa
     token = set_tool_runtime(ToolRuntimeContext(entity=SimpleNamespace(_ngram_ar_sessions=sessions)))
     try:
         result = json.loads(await ar_blender('execute', {'project_id': 'sculpture', 'request_id': 'edit', 'source': 'pass', 'position': [1, 0, -2]}))
+        stopped = json.loads(await ar_blender('stop', {'project_id': 'sculpture'}))
     finally:
         reset_tool_runtime(token)
     assert result['state'] == 'ready'
-    assert [a['payload']['revision'] for a in sent] == [1, 2]
+    assert [a['payload']['revision'] for a in sent] == [1, 2, 2]
+    assert stopped['state'] == 'stopped'
+    assert sent[-1]['payload']['stateOnly'] is True
+    assert sent[-1]['payload']['state'] == 'stopped'
     assert sent[0]['payload']['base'] == '/api/shells/test-agent/blender/sculpture'
     assert sent[0]['payload']['position'] == [1, 0, -2]
 

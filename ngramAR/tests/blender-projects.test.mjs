@@ -20,7 +20,11 @@ test('Blender revisions keep human transforms, defer held objects, and reject st
     } });
     links = new BlenderProjects({ world: { store, entries } });
     const payload = { projectId: 'sculpture', name: 'Sculpture', revision: 1, base: '/api/shells/test-agent/blender/sculpture', position: [0, 1, -2] };
+    assert.equal(links.attach({ ...payload, stateOnly: true, state: 'stopped' }).attached, false);
+    assert.equal(entries.size, 0, 'A status result must not spawn an object');
     const id = links.attach(payload).id;
+    links.attach({ ...payload, stateOnly: true, state: 'stopped' });
+    assert.equal(links.list()[0].state, 'stopped', 'An agent Stop updates the human inspector');
     assert.equal(entries.get(id).spec.asset.normalize, false, 'Keep authored metres and origin');
     store.apply({ requestId: 'human-placement', operations: [{ op: 'entity.patch', id, patch: { transform: { position: [2, 3, 4], scale: [2, 2, 2] } } }] }, 'human');
     store.locks.set(id, 'human');
