@@ -80,8 +80,8 @@ _MANAGED_REMOTE_PRESETS: dict[str, dict[str, str]] = {
 INFERENCE_PROVIDERS = frozenset({"local", "remote_gateway", "custom", *_MANAGED_REMOTE_PRESETS})
 
 # OpenAI's current embedding API can emit a chosen vector width. Keeping the
-# harness width at 768 preserves similarity with memories written by the
-# default local embedding model during provider switches.
+# harness width at 768 preserves storage compatibility. Different embedding
+# models still produce different vector spaces; existing memories need migration.
 DEFAULT_HOSTED_EMBEDDING_MODELS: dict[str, str] = {
     "openai": "text-embedding-3-small",
 }
@@ -100,6 +100,8 @@ def effective_inference_provider_name(harness: HarnessConfig) -> str:
     mode = (harness.deployment.mode or "local").strip().lower()
     if mode == "hybrid_railway":
         return "remote_gateway"
+    if mode == "cloud":
+        return "openai"
     return "local"
 
 

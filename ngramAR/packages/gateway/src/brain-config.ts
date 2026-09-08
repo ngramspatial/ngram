@@ -160,9 +160,9 @@ export function publicBrainConfig(config) {
   if (!config) {
     return {
       configured: false,
-      mode: "private",
-      provider: "remote_gateway",
-      model: "",
+      mode: "frontier",
+      provider: "openai",
+      model: BRAIN_PROVIDERS[0].defaultModel,
       baseUrl: "",
       hasApiKey: false,
     };

@@ -4,8 +4,16 @@
  * Precedence: shell `binding.options.bridgeUrl`, then `NGRAM_AR_ENTITY_BRIDGE_URL`.
  * Optional token: `NGRAM_AR_ENTITY_BRIDGE_TOKEN` (sent as a Bearer header).
  */
-export function resolveEntityBridgeConfig(binding) {
+import { loadConnection } from './onboarding.js';
+
+export function resolveEntityBridgeConfig(binding, shellsDir) {
     const opts = binding.options ?? {};
+    if (opts.connectionId) {
+        if (!shellsDir) throw Error('Saved worker connections require the shell workspace.');
+        const saved = loadConnection(shellsDir, opts.connectionId);
+        return { bridgeUrl: saved.bridgeUrl, token: saved.token || undefined,
+            brainConfig: saved.brain || undefined, useGlobalBrain: saved.useGlobalBrain === true, responseTimeoutMs: 600000 };
+    }
     const fromYaml = (typeof opts["bridgeUrl"] === "string" && opts["bridgeUrl"].trim()) ||
         (typeof binding.bridgeUrl === "string" &&
             binding.bridgeUrl.trim()) ||

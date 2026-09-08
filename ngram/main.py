@@ -291,10 +291,11 @@ def cli() -> None:
 @cli.command("setup")
 @click.option(
     "--profile",
-    type=click.Choice(["ask", "local", "hosted", "hybrid"], case_sensitive=False),
+    type=click.Choice(["ask", "cloud", "local", "hosted", "hybrid"], case_sensitive=False),
     default="ask",
     show_default=True,
     help=(
+        "cloud = recommended API + Railway worker with persistent memory; "
         "local = Ollama on this machine; hosted = API brain with the runtime on this "
         "machine; hybrid = advanced home-gateway + Railway deployment."
     ),
@@ -336,7 +337,7 @@ def cmd_setup(
     gateway_port: int,
     skip_tunnel_bootstrap: bool,
 ) -> None:
-    """Interactive local-first setup; Cloudflare is needed only for advanced hybrid mode."""
+    """Guided cloud setup: hosted thinking and embeddings, Railway, and persistent memory."""
     from ngram.setup_wizard import run_setup_wizard
 
     resolved = profile

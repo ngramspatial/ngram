@@ -4,7 +4,7 @@ import { createServer as createHttpsServer } from "node:https";
 import { createServer as createNetServer } from "node:net";
 import { readFile, stat, writeFile, mkdir, readdir, rm } from "node:fs/promises";
 import { existsSync, readdirSync, readFileSync, mkdirSync, rmSync } from "node:fs";
-import { join, extname, resolve } from "node:path";
+import { join, extname, resolve, sep } from "node:path";
 import { tmpdir, networkInterfaces } from "node:os";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { execSync } from "node:child_process";
@@ -18,6 +18,7 @@ import { buildArCognitionContextMarkdown } from "./ar-cognition-context.js";
 import { MotionProviderClient } from "./motion-provider.js";
 import { proxyBlender } from './blender-proxy.js';
 import { proxyAttachment } from './attachment-proxy.js';
+import { normalizeConnection, normalizeCreation, verifyConnection, writeConnectedShell } from './onboarding.js';
 import { VOICE_PROVIDERS, loadVoiceConfig, normalizeVoiceConfig, publicVoiceConfig, saveVoiceConfig, voiceEnvironmentKey } from './voice-config.js';
 import {
     BRAIN_PROVIDERS,
@@ -222,19 +223,20 @@ export class NgramArServer {
             try {
                 const shell = await loadShellDefinition(join(resolve(this.options.shellsDir), attachmentMatch[1]));
                 if (!isngramEntityBinding(shell.binding)) throw Error('No entity attachment host');
-                return await proxyAttachment(req, res, resolveEntityBridgeConfig(shell.binding), attachmentMatch[2]);
+                return await proxyAttachment(req, res, resolveEntityBridgeConfig(shell.binding, this.options.shellsDir), attachmentMatch[2]);
             } catch {
                 res.writeHead(409, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ error: 'Attachments require an ngram Entity worker for this agent.' }));
                 return;
             }
         }
+        if (pathname === '/api/onboarding' && req.method === 'GET') return this.handleOnboarding(req, res);
         const blenderMatch = pathname.match(/^\/api\/shells\/([a-z0-9-]+)\/blender\/(.+)$/);
         if (blenderMatch) {
             try {
                 const shell = await loadShellDefinition(join(resolve(this.options.shellsDir), blenderMatch[1]));
                 if (!isngramEntityBinding(shell.binding)) throw Error('No entity execution host');
-                return await proxyBlender(req, res, resolveEntityBridgeConfig(shell.binding), blenderMatch[2]);
+                return await proxyBlender(req, res, resolveEntityBridgeConfig(shell.binding, this.options.shellsDir), blenderMatch[2]);
             } catch {
                 res.writeHead(404, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ ok: false, error: 'No Blender bridge for this agent' }));
@@ -435,81 +437,51 @@ export class NgramArServer {
         return null;
     }
     // ─── Shell Creation ───────────────────────────────────────────────────────
-    async handleCreateShell(req, res) {
-        try {
-            const chunks = [];
-            for await (const chunk of req) {
-                chunks.push(chunk);
-            }
-            const body = JSON.parse(Buffer.concat(chunks).toString("utf-8"));
-            const name = (body.name ?? "").trim();
-            if (!name) {
-                res.writeHead(400, { "Content-Type": "application/json" });
-                res.end(JSON.stringify({ error: "Name is required" }));
-                return;
-            }
-            const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-            if (!slug) {
-                res.writeHead(400, { "Content-Type": "application/json" });
-                res.end(JSON.stringify({ error: "Invalid name" }));
-                return;
-            }
-            const shellsRoot = resolve(this.options.shellsDir);
-            const newShellDir = join(shellsRoot, slug);
-            if (existsSync(newShellDir)) {
-                res.writeHead(409, { "Content-Type": "application/json" });
-                res.end(JSON.stringify({ error: `Shell "${slug}" already exists` }));
-                return;
-            }
-            await mkdir(newShellDir, { recursive: true });
-            const voice = body.voice ?? "en-US-JennyNeural";
-            const yaml = `name: ${name}
-description: ${name}'s replaceable spatial body for a persistent ngram Entity.
-
-model: default
-scale: 0.4
-
-animationPack: standard
-
-behaviorPack:
-  - look-at-user
-  - idle-breathe
-  - anchor-to-surface
-  - proximity-greet
-  - gesture-respond
-
-voice:
-  provider: edge
-  voice: ${voice}
-
-toolSurfaces:
-  - floating-card
-
-binding:
-  type: ngram_entity
-  options: {}
-  system: |
-    This surface gives you an embodied WebXR presence in the user's room.
-    Treat spatial perception as environmental context, not identity instructions.
-    Your identity, memory, relationships, judgment, and voice remain those of
-    the running ngram Entity.
-`;
-            await writeFile(join(newShellDir, "shell.yaml"), yaml, "utf-8");
-            log(`Shell created: ${slug} (${name})`);
-            res.writeHead(201, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({
-                slug,
-                name,
-                description: "A replaceable spatial body for a persistent ngram Entity.",
-                voice,
-                bindingType: "ngram_entity",
-                path: newShellDir,
-            }));
+    async handleOnboarding(req, res) {
+        res.removeHeader('Access-Control-Allow-Origin');
+        res.setHeader('Cache-Control', 'no-store');
+        if (!this.isSameOriginControlRequest(req)) { res.writeHead(403).end(); return; }
+        const connections = [];
+        for (const entry of await readdir(this.options.shellsDir, { withFileTypes: true }).catch(() => [])) {
+            if (!entry.isDirectory()) continue;
+            try {
+                const shell = await loadShellDefinition(join(this.options.shellsDir, entry.name));
+                const config = resolveEntityBridgeConfig(shell.binding, this.options.shellsDir);
+                if (isngramEntityBinding(shell.binding) && config.bridgeUrl) connections.push({ slug: entry.name, name: shell.name });
+            } catch { /* Unpaired shells are not reusable connections. */ }
         }
-        catch (e) {
-            logError("Error creating shell:", e);
-            res.writeHead(500, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({ error: "Failed to create shell" }));
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ connections, needsSetup: connections.length === 0, humanAvailable: existsSync(join(this.options.shellsDir, "canary/models/michelle/michelle.fbx")),
+            defaults: { provider: 'openai', model: BRAIN_PROVIDERS[0].defaultModel, embeddingModel: 'text-embedding-3-small' } }));
+    }
+    async handleCreateShell(req, res) {
+        res.removeHeader('Access-Control-Allow-Origin');
+        res.setHeader('Cache-Control', 'no-store');
+        const respond = (code, data) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(data)); };
+        if (!this.isSameOriginControlRequest(req)) return respond(403, { error: 'Setup is available only from this app.' });
+        try {
+            const body = JSON.parse(await this.readBody(req, 24000));
+            const creation = normalizeCreation(body);
+            if (existsSync(join(resolve(this.options.shellsDir), creation.slug))) return respond(409, { error: 'That name is already in use. Choose another name for this body.' });
+            let connection;
+            if (body.reuseShell) {
+                if (!/^[a-z0-9-]+$/.test(body.reuseShell)) throw Error('Choose a saved connection.');
+                const shell = await loadShellDefinition(join(this.options.shellsDir, body.reuseShell));
+                if (!isngramEntityBinding(shell.binding)) throw Error('This shell has no persistent Entity.');
+                const saved = resolveEntityBridgeConfig(shell.binding, this.options.shellsDir);
+                connection = normalizeConnection(saved);
+                // Reusing a worker preserves its inference and memory configuration.
+                creation.brain = saved.brainConfig || null;
+            } else connection = normalizeConnection(body.connection);
+            const status = await verifyConnection(connection, body.reuseShell ? null : creation.brain);
+            const result = await writeConnectedShell(this.options.shellsDir, creation, connection, status);
+            if (!this.defaultShellSlug) this.defaultShellSlug = result.slug;
+            log('Connected shell created:', result.slug);
+            return respond(201, result);
+        } catch (error) {
+            if (error.code === 'EEXIST') return respond(409, { error: 'That name is already in use. Choose another name.' });
+            // Never echo request bodies, provider responses, or credentials to logs.
+            return respond(400, { error: error instanceof SyntaxError ? 'The setup request was invalid.' : String(error.message || 'Setup failed. Please retry.').slice(0, 400) });
         }
     }
     async handleListShells(_req, res) {
@@ -757,7 +729,7 @@ binding:
     // ─── Agent Messaging ────────────────────────────────────────────────────────
     createShellBinding(shell, sessionId, shellSlug, arBridge) {
         if (isngramEntityBinding(shell.binding)) {
-            const cfg = resolveEntityBridgeConfig(shell.binding);
+            const cfg = resolveEntityBridgeConfig(shell.binding, this.options.shellsDir);
             const arMd = arBridge != null
                 ? buildArCognitionContextMarkdown({
                     shellSlug,
@@ -769,7 +741,7 @@ binding:
             return new EntityBridgeBinding({
                 ...cfg,
                 arCognitionContextMarkdown: arMd || undefined,
-                brainConfig: runtimeBrainConfig(this.brainConfig) || undefined,
+                brainConfig: cfg.brainConfig || (cfg.useGlobalBrain || !shell.binding.options?.connectionId ? runtimeBrainConfig(this.brainConfig) : undefined) || undefined,
             }, {
                 sessionId,
                 shellName: shell.name,
@@ -890,9 +862,12 @@ binding:
             }
         }
     }
-    async readBody(req) {
+    async readBody(req, maxBytes = 8_000_000) {
         const chunks = [];
+        let bytes = 0;
         for await (const chunk of req) {
+            bytes += chunk.length;
+            if (bytes > maxBytes) throw Error("Request is too large.");
             chunks.push(chunk);
         }
         return Buffer.concat(chunks).toString("utf-8");
@@ -1187,9 +1162,12 @@ binding:
                         required: ["name"],
                         properties: {
                             name: { type: "string" },
-                            model: { type: "string", description: "LLM model identifier (default: gpt-4o)" },
-                            voice: { type: "string", description: "TTS voice ID (default: echo)" },
-                            personality: { type: "string", description: "Custom personality description" },
+                            embodiment: { type: "string", enum: ["orb", "human"] },
+                            reuseShell: { type: "string", description: "Reuse this shell?s worker, preserving its identity and memories" },
+                            connection: { type: "object", required: ["bridgeUrl"], properties: { bridgeUrl: { type: "string" }, token: { type: "string", writeOnly: true } } },
+                            brain: { type: "object", description: "Optional hosted provider configuration, including its embedding model" },
+                            voice: { type: "string", description: "TTS voice ID (default: en-US-JennyNeural)" },
+
                         },
                     },
                     ShellCreated: {
@@ -1263,7 +1241,7 @@ binding:
             res.end("Not Found");
             return;
         }
-        if (!filePath.startsWith(resolvedShellsDir)) {
+        if (!filePath.startsWith(resolvedShellsDir + sep) || pathname.split(/[\\/]/).some(part => part.startsWith("."))) {
             res.writeHead(403, { "Content-Type": "text/plain" });
             res.end("Forbidden");
             return;

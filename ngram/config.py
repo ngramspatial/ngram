@@ -34,7 +34,7 @@ def _expand(path: str, entity_name: str) -> str:
 class DeploymentSettings:
     """Where the body runs: local workstation vs split Railway + home inference."""
 
-    mode: str = "local"  # local | hybrid_railway
+    mode: str = "local"  # local | cloud | hybrid_railway
 
 
 @dataclass
@@ -880,7 +880,7 @@ def _dict_to_harness(d: dict[str, Any]) -> HarnessConfig:
 def apply_harness_env_overrides(h: HarnessConfig) -> None:
     """Railway-friendly env overrides (see .env.example)."""
     dm = (os.environ.get("NGRAM_DEPLOYMENT_MODE") or "").strip().lower()
-    if dm in ("local", "hybrid_railway"):
+    if dm in ("local", "cloud", "hybrid_railway"):
         h.deployment.mode = dm
     ip = (os.environ.get("NGRAM_INFERENCE_PROVIDER") or "").strip().lower()
     from ngram.inference.factory import INFERENCE_PROVIDERS
@@ -1172,6 +1172,12 @@ def load_entity_config(
     entity_name: str | Path, harness: HarnessConfig | None = None
 ) -> EntityConfig:
     h = harness or load_harness_config()
+    deployed_yaml = os.environ.get("NGRAM_ENTITY_CONFIG_YAML", "").strip()
+    if deployed_yaml and str(entity_name) == os.environ.get("NGRAM_ENTITY", ""):
+        data = yaml.safe_load(deployed_yaml)
+        if not isinstance(data, dict):
+            raise ValueError("NGRAM_ENTITY_CONFIG_YAML must be an Entity mapping")
+        return entity_from_dict(h, data)
     candidate = Path(str(entity_name)).expanduser()
     if candidate.is_dir() and (candidate / "manifest.json").is_file():
         return load_live_container_config(candidate, h)

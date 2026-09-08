@@ -1,6 +1,7 @@
 // @ts-nocheck
 import { marked } from 'marked';
 import { renderAttachments, type ChatAttachment } from './attachments.js';
+import { initOnboarding } from './onboarding.js';
 import { isThemeName, nextTheme, normalizeTheme, themeUsesDarkPanels } from './theme.js';
 import { providerLogo } from './provider-logos.js';
 
@@ -9,6 +10,7 @@ marked.setOptions({ breaks: true, gfm: true });
 export interface CreateAgentData {
   name: string;
   voice: string;
+  embodiment: string;
 }
 
 export interface DevToolsHandle {
@@ -893,74 +895,12 @@ export function setupUI(): UIHandle {
   textInput?.addEventListener('focus', updatePlaceholderVisibility);
   textInput?.addEventListener('blur', updatePlaceholderVisibility);
 
-  // --- Create Agent Modal ---
-  const createModal = document.getElementById('create-modal') as HTMLElement;
-  const createBtn = document.getElementById('create-agent-btn') as HTMLButtonElement;
-  const createCloseBtn = document.getElementById('create-modal-close') as HTMLButtonElement;
-  const createCancelBtn = document.getElementById('create-modal-cancel') as HTMLButtonElement;
-  const createSubmitBtn = document.getElementById('create-modal-submit') as HTMLButtonElement;
-  const createNameInput = document.getElementById('create-name') as HTMLInputElement;
-  const createVoiceSelect = document.getElementById('create-voice') as HTMLSelectElement;
-
+  // Guided creation keeps pairing, hosted memory, and appearance in one flow.
   const createAgentCallbacks: Array<(data: CreateAgentData) => void> = [];
-
-  function openCreateModal(): void {
-    createNameInput.value = '';
-    createVoiceSelect.value = 'en-US-JennyNeural';
-    createSubmitBtn.disabled = true;
-    createModal?.classList.add('open');
-    setTimeout(() => createNameInput?.focus(), 80);
-  }
-
-  function closeCreateModal(): void {
-    createModal?.classList.remove('open');
-  }
-
-  createBtn?.addEventListener('click', openCreateModal);
-  createCloseBtn?.addEventListener('click', closeCreateModal);
-  createCancelBtn?.addEventListener('click', closeCreateModal);
-
-  createModal?.addEventListener('click', (e) => {
-    if (e.target === createModal) closeCreateModal();
-  });
-
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && createModal?.classList.contains('open')) {
-      closeCreateModal();
-    }
-  });
-
-  createNameInput?.addEventListener('input', () => {
-    const valid = createNameInput.value.trim().length > 0;
-    createSubmitBtn.disabled = !valid;
-  });
-
-  createSubmitBtn?.addEventListener('click', () => {
-    const name = createNameInput.value.trim();
-    if (!name) return;
-    createSubmitBtn.disabled = true;
-    createSubmitBtn.textContent = 'Creating...';
-
-    const data: CreateAgentData = {
-      name,
-      voice: createVoiceSelect.value,
-    };
-
-    createAgentCallbacks.forEach((cb) => cb(data));
-  });
-
+  initOnboarding(data => createAgentCallbacks.forEach(callback => callback(data)));
   function onCreateAgent(cb: (data: CreateAgentData) => void): void {
     createAgentCallbacks.push(cb);
   }
-
-  function resetCreateModal(): void {
-    createSubmitBtn.disabled = false;
-    createSubmitBtn.textContent = 'Create Shell';
-    closeCreateModal();
-  }
-
-  // Expose resetCreateModal on the module for external use
-  (window as any).__ngramArResetCreateModal = resetCreateModal;
 
   // --- DevTools Panel ---
   const devpanel = document.getElementById('devpanel') as HTMLElement;
@@ -1443,7 +1383,7 @@ export function setupUI(): UIHandle {
     private: { provider: 'remote_gateway', model: '', baseUrl: '', embeddingMode: 'provider', embeddingModel: '' },
     frontier: { provider: 'openai', model: 'gpt-6-astra', baseUrl: '', embeddingMode: 'provider', embeddingModel: 'text-embedding-3-small' },
   };
-  let brainMode: BrainMode = 'private';
+  let brainMode: BrainMode = 'frontier';
   let brainProviders: BrainProvider[] = [];
   let brainConfig: BrainPublicConfig | null = null;
   let brainLoaded = false;
