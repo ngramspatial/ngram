@@ -107,7 +107,8 @@ export function setupWorkStatus(host: HTMLElement, onLabel?: (label: string) => 
         `${view.label} · ${view.stageElapsed} in this stage\n${view.details.join('\n')}\n\n${view.history.join('\n')}`;
     }
     const active = views.find(v => v.active && v.scope === 'turn') ?? views.find(v => v.active);
-    onLabel?.(active ? `${active.caution || active.label} · ${active.elapsed}` : '');
+    // Put elapsed first so the narrow headset badge cannot truncate the timer.
+    onLabel?.(active ? `${active.elapsed} · ${active.caution || active.label}` : '');
   };
   const timer = setInterval(render, 1000);
   return { store, update(event: WorkStatus) { store.update(event); render(); },

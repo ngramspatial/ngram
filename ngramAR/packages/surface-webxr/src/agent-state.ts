@@ -168,7 +168,13 @@ export class AgentStateDisplay {
 
     if (this.state === 'idle') {
       if (this.spinner) this.spinner.visible = false;
-      if (this.badge) this.badge.visible = false;
+      if (this.badge) {
+        this.badge.visible = isAR && !!this.workLabel;
+        if (this.badge.visible) {
+          this.badge.position.set(avatarPosition.x, avatarPosition.y + 1.95 * avatarScale, avatarPosition.z);
+          this.renderBadge();
+        }
+      }
       return;
     }
 
@@ -268,7 +274,7 @@ export class AgentStateDisplay {
 
     ctx.clearRect(0, 0, w, h);
 
-    if (this.state === 'idle') {
+    if (this.state === 'idle' && !this.workLabel) {
       (this.badge.material as THREE.SpriteMaterial).map!.needsUpdate = true;
       return;
     }
