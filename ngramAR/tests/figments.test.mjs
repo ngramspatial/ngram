@@ -173,6 +173,85 @@ test("holding a Figment preserves physical ownership while its actions, properti
   world.unsubscribePhysics();
 });
 
+test("Figment outlines are opt-in per object, including newly spawned copies", () => {
+  const previousWindow = globalThis.window;
+  globalThis.window = new EventTarget();
+  const world = new m.CreationWorld(new m.Scene());
+  const input = new m.CreationInput(world, new m.PerspectiveCamera(), new EventTarget());
+  const coin = { geometry: { shape: "cylinder", size: [.06,.009,.06] }, figment: {
+    anchors: { center: {} }, grips: { whole_coin: { anchor: "center", radius: .04 } },
+  } };
+  const visibleGrips = () => input.gripMarkers.children.filter(marker => marker.visible);
+  try {
+    apply(world, [create("coin", coin)]);
+    input.select("coin"); input.update();
+    assert.equal(input.showGrips, false);
+    assert.equal(input.outline.visible, false);
+    assert.equal(visibleGrips().length, 0);
+
+    input.showGrips = true; input.update();
+    assert.equal(input.outline.visible, true);
+    assert.equal(visibleGrips().length, 1);
+
+    apply(world, [create("copy", coin)]);
+    input.select("copy"); input.update();
+    assert.equal(input.showGrips, false);
+    assert.equal(input.outline.visible, false);
+    assert.equal(visibleGrips().length, 0);
+
+    input.select("coin"); input.update();
+    assert.equal(input.showGrips, true);
+    assert.equal(input.outline.visible, true);
+    input.showGrips = false; input.update();
+    assert.equal(input.outline.visible, false);
+    assert.equal(visibleGrips().length, 0);
+
+    apply(world, [create("primitive")]);
+    input.select("primitive"); input.update();
+    assert.equal(input.outline.visible, true);
+    assert.equal(visibleGrips().length, 0);
+    input.select(null); input.update();
+    assert.equal(input.outline.visible, false);
+  } finally { world.unsubscribePhysics(); globalThis.window = previousWindow; }
+});
+
+test("click-away deselects models and hides guides without interrupting a grab or inspector edits", () => {
+  const previousWindow = globalThis.window;
+  globalThis.window = new EventTarget();
+  const world = new m.CreationWorld(new m.Scene()), canvas = new EventTarget();
+  canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 100, height: 100 });
+  canvas.setPointerCapture = () => {}; canvas.hasPointerCapture = () => false; canvas.style = {};
+  const input = new m.CreationInput(world, new m.PerspectiveCamera(60,1,.1,100), canvas);
+  const pointer = (target, type, values = {}) => {
+    const event = new Event(type); Object.assign(event, { button: 0, pointerId: 1, clientX: 50, clientY: 50, ...values });
+    target.dispatchEvent(event);
+  };
+  try {
+    apply(world, [create("model", { transform: { position: [0,0,-3] }, figment: { anchors: { center: {} }, grips: { hold: { anchor: "center" } } } })]);
+    pointer(canvas, 'pointerdown');
+    assert.equal(input.selected, 'model'); assert.equal(input.holds.size, 1);
+    pointer(canvas, 'pointerdown', { pointerId: 2, clientX: 0, clientY: 0 });
+    assert.equal(input.selected, 'model'); assert.equal(input.holds.size, 1);
+    pointer(canvas, 'pointerup');
+    input.showGrips = true; input.update(); assert.equal(input.outline.visible, true);
+    pointer(canvas, 'pointerdown', { clientX: 0, clientY: 0 }); input.update();
+    assert.equal(input.selected, null); assert.equal(input.outline.visible, false);
+    assert.ok(input.gripMarkers.children.every(marker => !marker.visible));
+
+    input.select('model');
+    pointer(window, 'pointerdown', { composedPath: () => [{ id: 'creation-studio' }, window] });
+    assert.equal(input.selected, 'model');
+    pointer(window, 'pointerdown', { composedPath: () => [canvas, window] });
+    assert.equal(input.selected, 'model');
+    pointer(window, 'pointerdown', { composedPath: () => [{ id: 'chat-input' }, window] });
+    assert.equal(input.selected, null);
+
+    input.select('model');
+    input.updateXR([{ id:'left', handedness:'left', position:new m.Vector3(10,0,0), ray:new m.Ray(new m.Vector3(10,0,0),new m.Vector3(0,0,-1)), isActive:true, wasActive:false }]);
+    assert.equal(input.selected, null);
+  } finally { input.releaseAll(); world.unsubscribePhysics(); globalThis.window = previousWindow; }
+});
+
 test("actual XR grip input aims between two authored handles without stretching the object", () => {
   const previousWindow = globalThis.window;
   globalThis.window = new EventTarget();
@@ -188,6 +267,9 @@ test("actual XR grip input aims between two authored handles without stretching 
     assert.equal(world.store.locks.get("bar"), "xr:left");
     assert.equal(input.holds.get("xr:left").grip.name, "left");
     assert.equal(input.holds.get("xr:right").grip.name, "right");
+    input.update();
+    assert.equal(input.outline.visible, false);
+    assert.ok(input.gripMarkers.children.every(marker => !marker.visible));
     input.updateXR([pointer("left", [0,1,0], true, true), pointer("right", [1,1,0], true, true)]);
     const anchors = m.resolveFigmentAnchors(world, "bar");
     anchors.low.position.forEach((n,i) => near(n, [0,1,0][i]));

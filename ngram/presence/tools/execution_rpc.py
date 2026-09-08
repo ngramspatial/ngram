@@ -718,7 +718,7 @@ def local_body_host_permitted(entity: Any) -> bool:
     return (
         allow_local
         or mode == "local"
-        or (mode == "hybrid_railway" and on_railway)
+        or (mode in {"hybrid_railway", "cloud"} and on_railway)
     )
 
 

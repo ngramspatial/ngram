@@ -13,14 +13,28 @@ export class CreationInput {
   raycaster = new THREE.Raycaster();
   holds = new Map();
   outline;
-  showGrips = true;
+  // Guides are a local, per-object opt-in. New and restored Figments start clean.
+  gripOutlineNodes = new WeakSet<THREE.Object3D>();
   gripMarkers = new THREE.Group();
+  get showGrips() {
+    const node = this.world.entries.get(this.selected)?.node;
+    return !!node && this.gripOutlineNodes.has(node);
+  }
+  set showGrips(visible) {
+    const node = this.world.entries.get(this.selected)?.node;
+    if (!node) return;
+    if (visible) this.gripOutlineNodes.add(node);
+    else this.gripOutlineNodes.delete(node);
+  }
   constructor(world, camera, canvas) {
     this.world = world;
     this.camera = camera;
     this.canvas = canvas;
     this.outline = new THREE.Box3Helper(new THREE.Box3(), 0x6e7dff);
     this.outline.visible = false;
+    this.outline.material.transparent = true;
+    this.outline.material.opacity = .65;
+    this.outline.material.depthWrite = false;
     world.root.parent.add(this.outline);
     world.root.parent.add(this.gripMarkers);
     canvas.addEventListener("pointerdown", this.down, true);
@@ -32,6 +46,7 @@ export class CreationInput {
       passive: false,
     });
     window.addEventListener("blur", () => this.releaseAll());
+    window.addEventListener("pointerdown", this.outside, true);
     canvas.addEventListener("dblclick", event => {
       const hit = this.hit(this.ray(event));
       if (hit) this.world.activate(this.grabbableParent(hit.object.userData.creationId) ?? hit.object.userData.creationId);
@@ -92,7 +107,10 @@ export class CreationInput {
       }).sort((a, b) => a.grip.distance - b.grip.distance)[0];
       if (near && near.grip.distance < .15) hit = { object: { userData: { creationId: near.id } }, point: new THREE.Vector3(...near.grip.pose.position), distance: 0 };
     }
-    if (!hit) return false;
+    if (!hit) {
+      if (!this.holds.size && this.selected !== null) this.select(null);
+      return false;
+    }
     const hitId = hit.object.userData.creationId;
     const id = this.world.entries.get(hitId)?.spec.control
         ? hitId
@@ -188,6 +206,13 @@ export class CreationInput {
     this.onSelect?.(this.selected);
     this.onDrag?.(this.holds.size > 0);
   }
+  private outside = (event) => {
+    if (event.button !== 0 || this.holds.size || this.selected === null) return;
+    const path = event.composedPath();
+    // Scene hits are handled by start(); inspector controls still need their selection.
+    if (path.includes(this.canvas) || path.some(node => node?.id === 'creation-studio')) return;
+    this.select(null);
+  };
   private down = (event) => {
     if (event.button !== 0) return;
     if (this.start(`pointer:${event.pointerId}`, this.ray(event))) {
@@ -336,21 +361,31 @@ export class CreationInput {
     return pointers.filter((p) => !consumed.has(p.id));
   }
   update() {
-    const node = this.world.entries.get(this.selected)?.node;
-    this.outline.visible = !!node;
-    if (node) {
+    const entry = this.world.entries.get(this.selected);
+    const node = entry?.node;
+    const showGrips = this.showGrips;
+    this.outline.visible = !!node && (!entry.spec.figment || showGrips);
+    if (this.outline.visible) {
       node.updateWorldMatrix(true, true);
       this.outline.box.setFromObject(node);
     }
-    const anchors = node && this.showGrips ? resolveFigmentAnchors(this.world, this.selected) : {};
-    const grips = this.world.entries.get(this.selected)?.spec.figment?.grips ?? {};
+    const anchors = node && showGrips ? resolveFigmentAnchors(this.world, this.selected) : {};
+    const grips = entry?.spec.figment?.grips ?? {};
     let index = 0;
     for (const grip of Object.values(grips)) {
       const pose = anchors[grip.anchor];
       if (!pose?.ready) continue;
       let marker = this.gripMarkers.children[index++];
       if (!marker) {
-        marker = new THREE.Mesh(new THREE.TorusGeometry(.035, .004, 6, 24), new THREE.MeshBasicMaterial({ color: 0x6e7dff, depthTest: false, transparent: true, opacity: .9 }));
+        // A single-pixel stroke stays delicate even when a small model is close up.
+        const points = Array.from({ length: 64 }, (_, i) => {
+          const angle = i * Math.PI * 2 / 64;
+          return new THREE.Vector3(Math.cos(angle) * .035, Math.sin(angle) * .035, 0);
+        });
+        marker = new THREE.LineLoop(
+          new THREE.BufferGeometry().setFromPoints(points),
+          new THREE.LineBasicMaterial({ color: 0x6e7dff, depthTest: false, depthWrite: false, transparent: true, opacity: .65 }),
+        );
         marker.renderOrder = 1000;
         this.gripMarkers.add(marker);
       }

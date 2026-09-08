@@ -64,6 +64,7 @@ _MOTION_ROOT_TARGETS = frozenset({"stationary", "user", "forward", "left", "righ
 _SPATIAL_CAPABILITIES = (
     *FIGMENT_TOOLS,
     "ar_blender",
+    "ar_environment",
     "ar_world",
     "ar_inspect_surface",
     "ar_move_to",
@@ -791,6 +792,8 @@ async def _ar_world(command: str, payload: dict[str, Any] | None = None) -> str:
 def register_ngram_ar_spatial_tools(registry: ToolRegistry) -> None:
     from ngram.ngram_ar.blender_tools import register_blender_tools
     register_blender_tools(registry)
+    from ngram.ngram_ar.environment_tools import register_environment_tools
+    register_environment_tools(registry)
     register_figment_tools(registry)
     registry.register_fn(
         "ar_world",

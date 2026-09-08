@@ -87,6 +87,7 @@ export function figmentInspector(service, input, e, parent, { make, button, run,
     for (const [name, preset] of Object.entries(FIGMENT_PRESETS))
       button(preset.title, () => update({ command: "attach", preset: name }), row, name === "prop");
   } else {
+    field("Show grip outlines", input.showGrips, "checkbox", value => { input.showGrips = value; }, section);
     const actions = make("div", null, section); actions.className = "row";
     for (const [action, descriptor] of Object.entries(f.actions))
       button(descriptor.label, () => service.figments.action(id, action), actions, true);
@@ -114,7 +115,6 @@ export function figmentInspector(service, input, e, parent, { make, button, run,
     }
     const grips = make("details", null, section);
     make("summary", `Grips · ${Object.keys(f.grips).length}`, grips);
-    field("Show grip markers", input.showGrips, "checkbox", value => { input.showGrips = value; }, grips);
     const anchors = service.world.sample(id).anchors ?? {};
     for (const [name, grip] of Object.entries(f.grips)) {
       const anchor = f.anchors[grip.anchor];

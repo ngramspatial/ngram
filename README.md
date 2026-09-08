@@ -187,7 +187,7 @@ Models can be FBX, GLB/glTF, or the built-in procedural avatar. See the
 
 ## Spatial tools and capabilities
 
-During an `ngram_ar` turn, the Entity receives 28 native spatial function
+During an `ngram_ar` turn, the Entity receives 29 native spatial function
 tools. They are not a separate character or agent: the same Entity, memory,
 relationships, and tool loop that answer on text surfaces also choose the body
 and scene actions below. Actions are delivered to the connected surface while
@@ -253,6 +253,7 @@ environment, placement, and pinned panels persist in the local browser.
 
 | Tool | Arguments | What it does |
 |---|---|---|
+| `ar_environment` | `command`, `payload` | Create immersive atmospheric skies, 360-degree panoramas, PBR reflections, lighting, fog, and exposure. Start with `capabilities`. |
 | `ar_set_environment` | `preset` | Selects `default`, `workshop`, `cozy`, `nature`, `space`, `party`, `focus`, or `night`. |
 | `ar_request_capture` | `prompt=""` | Requests one user-controlled camera/view capture for visual understanding. It fails closed when vision sharing is disabled. |
 | `ar_generate_motion` | `prompt`, `duration_seconds=4`, `root_target="stationary"`, `loop=false` | Requests a motion clip from the configured external motion provider, then plays it on the body. Duration is clamped to `0.5..30` seconds; root target is `stationary`, `user`, `forward`, `left`, or `right`. |

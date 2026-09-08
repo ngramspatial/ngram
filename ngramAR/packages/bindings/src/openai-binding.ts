@@ -201,7 +201,7 @@ export class OpenAIBinding {
         try { response = await this.callApi(messages); }
         catch (error) { if (epoch !== this.turnEpoch) return []; throw error; }
         if (epoch !== this.turnEpoch) return [];
-        if (response.choices[0]?.message.tool_calls?.some(tc => tc.function.name === 'world' || tc.function.name === 'request_capture' || isFigmentTool(tc.function.name))) {
+        if (response.choices[0]?.message.tool_calls?.some(tc => tc.function.name === 'world' || tc.function.name === 'environment' || tc.function.name === 'request_capture' || isFigmentTool(tc.function.name))) {
             return this.handleWorldTurn(messages, response, sessionId, epoch);
         }
         const choice = response.choices[0];
@@ -265,6 +265,8 @@ export class OpenAIBinding {
         }
         if (isFigmentTool(name)) return [createAction('action:world', sessionId, { command: 'figment', payload: figmentToolPayload(name, args) })];
         switch (name) {
+            case "environment":
+                return [createAction('action:world', sessionId, { command: 'environment', payload: { ...(args.payload ?? {}), command: args.command } })];
             case "world":
                 return [createAction('action:world', sessionId, { command: args.command, payload: args.payload ?? {} })];
             case "move_to": {
@@ -370,7 +372,7 @@ export class OpenAIBinding {
     async worldRequest(action) {
         if (!this.proactiveCallback) throw new Error('This adapter has no live renderer connection');
         return new Promise((resolve, reject) => {
-            const timeout = setTimeout(() => { this.worldPending.delete(action.actionId); reject(new Error('World confirmation timed out; execution unknown')); }, action.type === 'action:request_capture' ? 45000 : action.command === 'figment' && ['publish','export','import','place'].includes(action.payload?.command) ? 120000 : 8000);
+            const timeout = setTimeout(() => { this.worldPending.delete(action.actionId); reject(new Error('World confirmation timed out; execution unknown')); }, action.type === 'action:request_capture' ? 45000 : action.command === 'environment' || action.command === 'figment' && ['publish','export','import','place'].includes(action.payload?.command) ? 120000 : 8000);
             this.worldPending.set(action.actionId, { resolve, reject, timeout });
             try { this.proactiveCallback([action]); } catch (error) { clearTimeout(timeout); this.worldPending.delete(action.actionId); reject(error); }
         });
@@ -397,7 +399,7 @@ export class OpenAIBinding {
                 let result;
                 try {
                     const actions = this.resolveToolCall(call, sessionId);
-                    if (call.function.name === 'world' || call.function.name === 'request_capture' || isFigmentTool(call.function.name)) result = await this.worldRequest(actions[0]);
+                    if (call.function.name === 'world' || call.function.name === 'environment' || call.function.name === 'request_capture' || isFigmentTool(call.function.name)) result = await this.worldRequest(actions[0]);
                     else { this.proactiveCallback?.(actions); result = { status: 'accepted', detail: 'Completion not confirmed' }; }
                 } catch (error) { if (epoch !== this.turnEpoch) return []; result = { status: 'failed', error: String(error.message) }; }
                 let images = result?.result?.images ?? [];

@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import type { SceneLights } from './scene-setup.js';
 import type { EnvironmentPreset, LightingMood, ParticleType } from '@ngram-ar/core';
+import { SceneEnvironment } from './scene-environment.js';
 
 export interface SavedLightingOverride {
   color?: string;
@@ -20,6 +21,7 @@ export interface SavedEnvironmentState {
   preset?: EnvironmentPreset;
   lighting?: SavedLightingOverride;
   background?: SavedBackgroundOverride;
+  scene?: Record<string, unknown>;
 }
 
 // ─── Environment Presets ────────────────────────────────────────────────────
@@ -193,6 +195,8 @@ interface ActiveParticleEffect {
 const TRANSITION_SPEED = 1.5; // seconds for full transition
 
 export class EnvironmentManager {
+  sceneEnvironment: SceneEnvironment | null = null;
+  private sceneRestoreFallback = null;
   private scene: THREE.Scene | null = null;
   private renderer: THREE.WebGLRenderer | null = null;
   private lights: SceneLights | null = null;
@@ -222,6 +226,16 @@ export class EnvironmentManager {
     this.scene = scene;
     this.renderer = renderer;
     this.lights = lights;
+    this.sceneEnvironment = new SceneEnvironment(scene, renderer, lights);
+    let sceneRevision = 0;
+    this.sceneEnvironment.onChange = () => {
+      if (sceneRevision !== this.sceneEnvironment.revision) {
+        sceneRevision = this.sceneEnvironment.revision;
+        this.sceneRestoreFallback = null;
+      }
+      if (Object.keys(this.sceneEnvironment.config).length) this.hasDurableState = true;
+      this.notifyPersistChange();
+    };
     this.snapshotCurrent();
     if (!this.themeEnvironmentOverride) this.applyBackgroundOverride();
   }
@@ -244,6 +258,8 @@ export class EnvironmentManager {
     // durable lighting/background overrides on top of it.
     if (!this.presetExplicit && !this.lightingOverride) {
       if (this.backgroundOverride) this.applyBackgroundOverride();
+      this.sceneEnvironment?.refreshBackgroundBaseline();
+      this.sceneEnvironment?.apply();
       return;
     }
     if (!this.presetExplicit) this.snapshotCurrent();
@@ -266,11 +282,15 @@ export class EnvironmentManager {
     this.transitionProgress = 1;
     if (this.backgroundOverride) this.applyBackgroundOverride();
     else if (this.presetExplicit) this.scene.background = makeGradient(target.bgCenter, target.bgEdge);
+    this.sceneEnvironment?.refreshBackgroundBaseline();
+    this.sceneEnvironment?.apply();
   }
 
   getSavedState(): SavedEnvironmentState | undefined {
     if (!this.hasDurableState) return undefined;
     const state: SavedEnvironmentState = {};
+    if (this.sceneRestoreFallback) state.scene = structuredClone(this.sceneRestoreFallback);
+    else if (this.sceneEnvironment && Object.keys(this.sceneEnvironment.config).length) state.scene = structuredClone(this.sceneEnvironment.config);
     if (this.presetExplicit) state.preset = this.activePresetName;
     if (this.lightingOverride) state.lighting = { ...this.lightingOverride };
     if (this.backgroundOverride) {
@@ -284,13 +304,13 @@ export class EnvironmentManager {
     return state;
   }
 
-  loadSavedState(state: SavedEnvironmentState | null | undefined): void {
+  async loadSavedState(state: SavedEnvironmentState | null | undefined): Promise<void> {
     if (!state || typeof state !== 'object') return;
 
     const preset = this.isEnvironmentPreset(state.preset) ? state.preset : null;
     const lighting = this.normalizeLightingOverride(state.lighting);
     const background = this.normalizeBackgroundOverride(state.background);
-    if (!preset && !lighting && !background) return;
+    if (!preset && !lighting && !background && !state.scene) return;
 
     this.isRestoringSavedState = true;
     try {
@@ -298,14 +318,20 @@ export class EnvironmentManager {
       if (preset) this.setEnvironment(preset);
       if (lighting) this.setLighting(lighting);
       if (background) this.setBackground(background.color, background.gradient);
+      if (state.scene) {
+        this.sceneRestoreFallback = structuredClone(state.scene);
+        this.hasDurableState = true;
+        await this.sceneEnvironment?.configure(state.scene);
+      }
     } finally {
       this.isRestoringSavedState = false;
+      this.notifyPersistChange();
     }
-    this.notifyPersistChange();
   }
 
   setEnvironment(preset: EnvironmentPreset): void {
     if (!PRESETS[preset]) return;
+    this.sceneEnvironment?.clear();
     this.hasDurableState = true;
     this.presetExplicit = true;
     this.snapshotCurrent();
@@ -428,6 +454,7 @@ export class EnvironmentManager {
   }
 
   clearEnvironment(): void {
+    this.sceneEnvironment?.clear();
     this.snapshotCurrent();
     this.targetPreset = { ...PRESETS.default };
     this.activePresetName = 'default';
@@ -446,6 +473,14 @@ export class EnvironmentManager {
   update(dt: number): void {
     this.updateTransition(dt);
     this.updateParticles(dt);
+    this.sceneEnvironment?.apply();
+  }
+
+  async handle(command, payload = {}) {
+    if (!this.sceneEnvironment) throw Error('Environment renderer is not attached');
+    const result = await this.sceneEnvironment.handle(command, payload);
+    if (command === 'clear' || command === 'configure') this.reapplyState();
+    return command === 'capabilities' ? result : this.sceneEnvironment.inspect();
   }
 
   // ─── Internal ──────────────────────────────────────────────────────────────
@@ -497,6 +532,7 @@ export class EnvironmentManager {
     this.renderer.toneMappingExposure = lerp(a.exposure, b.exposure, t);
 
     // Background gradient
+    if (this.sceneEnvironment?.config.sky) return;
     if (this.backgroundOverride) {
       // A custom background is an override, so preset/lighting transitions must
       // never replace it, including on the final transition frame.

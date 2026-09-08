@@ -46,6 +46,8 @@ def _clear_execution_clients() -> None:
     [
         ("hybrid_railway", "", {}, False),
         ("hybrid_railway", "production", {}, True),
+        ("cloud", "", {}, False),
+        ("cloud", "production", {}, True),
         ("hybrid_railway", "", {"tools": {"execution": {"allow_local": True}}}, True),
         ("local", "", {}, True),
     ],
@@ -74,6 +76,7 @@ def test_allow_local_backend_hybrid_only_on_railway_or_opt_in(
     try:
         client = execution_rpc.get_execution_client()
         assert client.allow_local_backend is expect_local
+        assert execution_rpc.local_body_host_permitted(holder) is expect_local
     finally:
         reset_tool_runtime(tok)
 

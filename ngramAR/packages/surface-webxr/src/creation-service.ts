@@ -18,6 +18,7 @@ export class CreationService {
   storageError = null;
   restoreError = null;
   surfaceContext = null;
+  environment = null;
   legacyObjects = null;
   perform = null;
   cancelPerformance = null;
@@ -158,6 +159,7 @@ export class CreationService {
           figments: FIGMENT_API_HELP,
           features: {
             blenderPreviews: true,
+            skyboxes: !!this.environment,
             physics: true,
             figments: true,
             compoundColliders: true,
@@ -183,9 +185,15 @@ export class CreationService {
           surface: this.surfaceContext?.(),
           legacyObjects: this.legacyObjects?.(),
           blender: this.blender.list(),
+          environment: this.environment?.sceneEnvironment?.inspect(),
         };
       case 'blender':
         return this.blender.attach(payload);
+      case 'environment': {
+        if (!this.environment) throw Error('This surface has no environment renderer');
+        const { command, ...options } = payload;
+        return this.environment.handle(command, options);
+      }
       case "figment":
         return this.figments.handle(payload);
       case "perform": {

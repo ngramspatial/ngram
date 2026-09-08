@@ -358,7 +358,7 @@ export class SceneObjectManager {
       color: new THREE.Color(color),
       roughness: 0.4,
       metalness: 0.1,
-      envMap: this.envMap,
+      // Inherit the live scene environment so sky edits update reflections.
       envMapIntensity: 0.6,
     });
     const mesh = new THREE.Mesh(geo, mat);
@@ -522,7 +522,7 @@ export class SceneObjectManager {
       color: new THREE.Color(color),
       roughness: toyType === 'marble' ? 0.05 : 0.3,
       metalness: toyType === 'marble' ? 0.8 : 0.05,
-      envMap: this.envMap,
+      // Inherit the live scene environment so sky edits update reflections.
       envMapIntensity: toyType === 'marble' ? 1.2 : 0.6,
     });
     const mesh = new THREE.Mesh(geo, mat);

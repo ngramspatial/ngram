@@ -1,5 +1,6 @@
 // @ts-nocheck
 import { setupAttachments } from './attachment-composer.js';
+import { setupEnvironmentSettings } from './environment-settings.js';
 import * as THREE from 'three';
 import { loadSpatialAssets } from './spatial-design.js';
 import { createScene } from './scene-setup.js';
@@ -366,6 +367,8 @@ async function main() {
   const desktopInteraction = new DesktopInteraction(renderer, camera, sceneObjects);
   drawings.attach(scene);
   envManager.attach(scene, renderer, lights);
+  creationService.environment = envManager;
+  setupEnvironmentSettings(envManager);
   overlayBridge.attach(scene);
   xrPointers.attach(scene);
   panels.setPointerManager(xrPointers);
@@ -496,7 +499,7 @@ async function main() {
   }
 
   if (durableSceneState.environment) {
-    try { envManager.loadSavedState(durableSceneState.environment); } catch (err) {
+    try { await envManager.loadSavedState(durableSceneState.environment); } catch (err) {
       console.warn('[scene-state] Environment restore failed:', err);
     }
   }
@@ -2322,6 +2325,7 @@ async function main() {
       }
 
       desktopBackground = scene.background;
+      envManager.sceneEnvironment.setAR(true);
       scene.background = null;
       const groundStage = scene.getObjectByName('ground-stage');
       if (groundStage) groundStage.visible = false;
@@ -2367,6 +2371,8 @@ async function main() {
     } catch (err: any) {
       const msg = err?.message ?? String(err);
       console.error('[xr] failed to start AR', err);
+      envManager.sceneEnvironment.setAR(false);
+      envManager.reapplyState();
       ui.setStatus('AR failed', false);
       ui.addTranscript('agent', `[AR error: ${msg}]`);
     }
@@ -2390,6 +2396,8 @@ async function main() {
     }
     const groundStage = scene.getObjectByName('ground-stage');
     if (groundStage) groundStage.visible = true;
+    envManager.sceneEnvironment.setAR(false);
+    envManager.reapplyState();
     spatialUI.hideStatus();
     spatialUI.hideBubble();
     spatialUI.hideHelp();

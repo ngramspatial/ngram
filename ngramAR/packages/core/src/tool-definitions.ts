@@ -7,6 +7,15 @@ import { FIGMENT_TOOL_DEFINITIONS } from "./figment-tools.js";
 export const SPATIAL_TOOL_DEFINITIONS = [
     ...FIGMENT_TOOL_DEFINITIONS,
     {
+        name: "environment",
+        description: "Author actual skies and scene lighting. Call capabilities for the schema, inspect for confirmed state, configure for atmospheric skies or 2:1 panoramic JPG/PNG/WebP/HDR/EXR images, PBR reflections, sun direction, lights, fog, exposure and ground visibility. Blender equirectangular renders can be used as panorama URLs. Supplied blocks replace; null resets. XR passthrough remains enabled unless sky.immersive is true. Capture the scene to judge the result; do not continuously poll.",
+        parameters: {
+            command: { type: "string", enum: ["capabilities", "inspect", "configure", "clear"], description: "Environment operation." },
+            payload: { type: "object", description: "{sky?,lighting?,fog?,exposure?,ground?} per capabilities." },
+        },
+        required: ["command"],
+    },
+    {
         name: "world",
         description: "Inspect, build and program persistent spatial creations. Start with capabilities for the exact world and JavaScript API. observe returns live objects; apply commits batched geometry/material/physics/joint edits; program installs local tick/event handlers; events polls human interactions. Programs run locally without model calls. Do not repeatedly poll to watch a creation: finish the turn after building it.",
         parameters: {

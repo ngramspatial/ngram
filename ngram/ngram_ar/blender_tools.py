@@ -35,12 +35,13 @@ async def ar_blender(command: str, payload: dict[str, Any] | None = None) -> str
     async def show(snapshot):
         nonlocal last_revision, last_state, preview_result
         session = connected_spatial_session(ctx.entity, ctx.inp)
-        if not session or not re.fullmatch(r"[a-z0-9-]+", session.shell_slug):
+        shell_slug = getattr(session, "shell_slug", "") or ""
+        if not session or not re.fullmatch(r"[a-z0-9-]+", shell_slug):
             return
         revision = (snapshot.get("snapshot") or {}).get("revision", 0)
         if revision < 1 or (revision == last_revision and snapshot.get("state") == last_state):
             return
-        base = f"/api/shells/{session.shell_slug}/blender/{project}"
+        base = f"/api/shells/{shell_slug}/blender/{project}"
         preview_result = await session.dispatch({"type": "action:world", "command": "blender", "payload": {
             "projectId": project, "name": snapshot.get("name"), "revision": revision,
             "base": base, "position": args.get("position"), "state": snapshot.get("state"),
@@ -85,6 +86,15 @@ async def ar_blender(command: str, payload: dict[str, Any] | None = None) -> str
         raise
     if preview_result is not None:
         result["spatial_delivery"] = preview_result
+    session = connected_spatial_session(ctx.entity, ctx.inp)
+    shell_slug = getattr(session, "shell_slug", "") or ""
+    if session and re.fullmatch(r"[a-z0-9-]+", shell_slug) and project:
+        for render in result.get("renders") or []:
+            if render.get("projection") == "equirectangular":
+                result["skybox"] = {"sky": {
+                    "type": "panorama", "format": "image",
+                    "url": f"/api/shells/{shell_slug}/blender/{project}/renders/{render['render_id']}/view.jpg",
+                }}
     if command in {"render", "execute"} and result.get("state") == "ready" and result.get("renders"):
         images = []
         for render in result["renders"][-4:]:
@@ -120,6 +130,8 @@ def register_blender_tools(registry):
         "so human placement/scale survive edits. ar_world programs/controls can interact with the resulting asset. "
         "render gives YOU actual images in the current tool result. Call capabilities for camera, object isolation, studio/scene/clay lighting and resolution options. "
         "Use render_view(**options) inside execute to return up to four working views. Then use ar_request_capture for the actual Spatial appearance. "
+        "For immersive skyboxes use render with projection=equirectangular, style=scene, size=2048 and the viewer position/look_at (Blender Z-up). "
+        "Pass the returned skybox payload to ar_environment configure. Hybrid panoramas stream through the existing asset transport without external hosting. "
         "Inspect visually before and after material/geometry edits; successful loading alone does not verify appearance. "
         "The executable path is remembered per project. No model calls are needed for preview delivery. Use status only when needed, never a continuous model polling loop.",
         ar_blender,

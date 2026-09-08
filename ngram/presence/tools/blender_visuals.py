@@ -28,15 +28,19 @@ def render_options(value: dict | None = None) -> dict:
     }
     if set(value) - allowed:
         raise ValueError(f"Unknown render options: {sorted(set(value) - allowed)}")
-    out = {"size": 1024, "samples": 32, "style": "studio", "projection": "perspective", **value}
-    for key, lo, hi in [("size", 256, 1536), ("samples", 1, 256)]:
+    panorama = value.get("projection") == "equirectangular"
+    out = {"size": 2048 if panorama else 1024, "samples": 32, "style": "scene" if panorama else "studio", "projection": "perspective", **value}
+    for key, lo, hi in [("size", 256, 4096 if panorama else 1536), ("samples", 1, 256)]:
         if type(out[key]) is not int or not lo <= out[key] <= hi:
             raise ValueError(f"{key} must be an integer in {lo}..{hi}")
     if out["style"] not in {"scene", "studio", "clay"} or out["projection"] not in {
         "perspective",
         "orthographic",
+        "equirectangular",
     }:
         raise ValueError("Unknown render style or projection")
+    if panorama and (out["style"] != "scene" or out["size"] % 2):
+        raise ValueError("Panoramas require style=scene and an even size for a 2:1 image")
     if "camera" in out and (
         not isinstance(out["camera"], str) or not out["camera"] or len(out["camera"]) > 160
     ):
@@ -75,6 +79,7 @@ def render_view(directory: Path, revision: int, **kwargs) -> dict:
     from mathutils import Vector
 
     options = render_options(kwargs)
+    panorama = options["projection"] == "equirectangular"
     scene = bpy.context.scene
     bpy.context.view_layer.update()
     authored = list(scene.objects)
@@ -88,11 +93,11 @@ def render_view(directory: Path, revision: int, **kwargs) -> dict:
             and not o.hide_render
         ]
     )
-    if not objects or any(o is None for o in objects):
+    if (not objects and not panorama) or any(o is None for o in objects):
         raise ValueError("Render target is empty or an object name is missing")
     points = [o.matrix_world @ Vector(corner) for o in objects for corner in o.bound_box]
-    low = Vector([min(p[i] for p in points) for i in range(3)])
-    high = Vector([max(p[i] for p in points) for i in range(3)])
+    low = Vector([min(p[i] for p in points) for i in range(3)]) if points else Vector((0,0,0))
+    high = Vector([max(p[i] for p in points) for i in range(3)]) if points else Vector((0,0,0))
     center = Vector(options.get("look_at", (low + high) / 2))
     radius = max(0.01, (high - low).length / 2)
     camera_source = scene.objects.get(options["camera"]) if options.get("camera") else None
@@ -138,6 +143,9 @@ def render_view(directory: Path, revision: int, **kwargs) -> dict:
         ):
             camera.matrix_world = camera_source.matrix_world.copy()
         else:
+            if panorama:
+                center = Vector(options.get("look_at", [0,1,1.6]))
+                options.setdefault("position", [0,0,1.6])
             azimuth, elevation = map(math.radians, options.get("orbit", [35, 20]))
             direction = Vector(
                 (
@@ -157,6 +165,14 @@ def render_view(directory: Path, revision: int, **kwargs) -> dict:
             camera.rotation_euler = (center - camera.location).to_track_quat("-Z", "Y").to_euler()
             data.lens = 45
         data.type = "ORTHO" if options["projection"] == "orthographic" else "PERSP"
+        if panorama:
+            data.type = "PANO"
+            panorama_data = data if hasattr(data, "panorama_type") else data.cycles
+            panorama_data.panorama_type = "EQUIRECTANGULAR"
+            panorama_data.longitude_min = -math.pi
+            panorama_data.longitude_max = math.pi
+            panorama_data.latitude_min = -math.pi / 2
+            panorama_data.latitude_max = math.pi / 2
         data.ortho_scale = radius * 2.3
         data.clip_start = 0.001
         data.clip_end = max(100, (camera.location - center).length + radius * 4)
@@ -194,8 +210,13 @@ def render_view(directory: Path, revision: int, **kwargs) -> dict:
         for key, value in {
             "engine": "CYCLES",
             "resolution_x": options["size"],
-            "resolution_y": options["size"],
+            "resolution_y": options["size"] // 2 if panorama else options["size"],
             "resolution_percentage": 100,
+            "pixel_aspect_x": 1,
+            "pixel_aspect_y": 1,
+            "use_border": False,
+            "use_crop_to_border": False,
+            "use_multiview": False,
             "film_transparent": False,
             "use_compositing": False,
             "use_sequencer": False,
@@ -217,6 +238,9 @@ def render_view(directory: Path, revision: int, **kwargs) -> dict:
             "source_revision": revision,
             "source": "blender-render",
             "style": options["style"],
+            "projection": options["projection"],
+            "width": options["size"],
+            "height": options["size"] // 2 if panorama else options["size"],
             "size": options["size"],
             "objects": [o.name for o in objects],
             "camera_position": list(camera.location),

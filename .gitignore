@@ -60,6 +60,7 @@ secrets/
 # Local models / raw assets
 shanghai/
 blackdress/
+/coins/
 
 
 .vscode/

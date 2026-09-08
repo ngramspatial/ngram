@@ -80,6 +80,9 @@ class PresenceDaemon:
             replace_existing=True,
         )
         self._scheduler.start()
+        start_code_tasks = getattr(self.entity, "start_code_tasks", None)
+        if start_code_tasks is not None:
+            start_code_tasks()
         if self.cfg.automations.enabled:
             try:
                 await self.entity.automation_engine.startup()
