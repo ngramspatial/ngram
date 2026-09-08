@@ -835,6 +835,11 @@ binding:
                 this.sessions.set(sessionId, session);
                 log(`API session created: ${sessionId} (shell "${slug}")`);
             }
+            if (session.messageActive) {
+                res.writeHead(409, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: 'This API session already has an active message.' }));
+                return;
+            }
             session.lastActivity = Date.now();
             const event = {
                 type: "event:user_speech",
@@ -844,7 +849,20 @@ binding:
                 timestamp: Date.now(),
                 sessionId: sessionId,
             };
-            const actions = await session.binding.handleEvent(event);
+            // HTTP clients have no proactive WebSocket listener. Retain the live
+            // reply until the final receipt arrives, including say() tool speech.
+            const liveActions = [];
+            session.messageActive = true;
+            session.binding.onProactiveAction?.(batch => liveActions.push(...batch));
+            let actions;
+            try {
+                const finalActions = await session.binding.handleEvent(event);
+                actions = [...liveActions, ...finalActions];
+            } finally {
+                session.binding.onProactiveAction?.(() => {});
+                session.messageActive = false;
+                session.lastActivity = Date.now();
+            }
             const cleanActions = actions.map((a) => {
                 if (a.type === "action:speak") {
                     const { audioData, visemes, ...rest } = a;
@@ -865,7 +883,7 @@ binding:
         const maxAge = 5 * 60 * 1000;
         const now = Date.now();
         for (const [id, session] of this.sessions) {
-            if (now - session.lastActivity > maxAge) {
+            if (!session.messageActive && now - session.lastActivity > maxAge) {
                 session.binding.stop().catch(() => { });
                 this.sessions.delete(id);
                 log(`API session expired: ${id}`);
