@@ -20,7 +20,9 @@ def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any
     return out
 
 
-def _code_timeout(default_timeout: int) -> int:
+def _code_timeout(requested_timeout: int) -> int:
+    if requested_timeout:
+        return max(1, int(requested_timeout))
     ctx = require_tool_runtime()
     entity = ctx.entity
     base = entity.config.harness.tools if isinstance(entity.config.harness.tools, dict) else {}
@@ -28,16 +30,16 @@ def _code_timeout(default_timeout: int) -> int:
     merged = _deep_merge(base, over if isinstance(over, dict) else {})
     code_cfg = merged.get("code") if isinstance(merged.get("code"), dict) else {}
     try:
-        return max(1, int(code_cfg.get("timeout") or default_timeout))
+        return max(1, int(code_cfg.get("timeout") or 30))
     except Exception:
-        return max(1, int(default_timeout))
+        return 30
 
 
 @tool(
     name="execute_python",
     description="Write and run Python code. Prototype ideas, process data, test things, build tools for yourself.",
 )
-async def execute_python(code: str, timeout: int = 30) -> str:
+async def execute_python(code: str, timeout: int = 0) -> str:
     src = (code or "").strip()
     if not src:
         return json.dumps({"error": "empty code"})
@@ -51,7 +53,7 @@ async def execute_python(code: str, timeout: int = 30) -> str:
     name="execute_javascript",
     description="Run JavaScript code via Node.js",
 )
-async def execute_javascript(code: str, timeout: int = 30) -> str:
+async def execute_javascript(code: str, timeout: int = 0) -> str:
     src = (code or "").strip()
     if not src:
         return json.dumps({"error": "empty code"})

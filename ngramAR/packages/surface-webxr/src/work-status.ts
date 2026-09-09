@@ -5,6 +5,7 @@ export interface WorkStatus {
   heartbeat?: boolean; attempt?: number; maxAttempts?: number; timeoutMs?: number;
   retryDelayMs?: number; tool?: string; operation?: string; project?: string; revision?: number;
   phase?: number; mode?: string;
+  summary?: string; reason?: string; nextSteps?: string;
 }
 type Record = { event: WorkStatus; received: number; history: string[];
   substantial: boolean; authoringSteps: number; authoringStartedMs?: number };
@@ -81,7 +82,7 @@ export class WorkStatusStore {
       const { event, received } = record;
       // A slow chat response, retry or lookup is not evidence of a coding job.
       // Once real work qualifies, keep its subsequent model/tool phases visible.
-      if (event.status !== 'running') return false;
+      if (event.status !== 'running') return event.scope === 'code_task' && now - received < 120000;
       const liveAge = this.connected && now - received <= 35000 ? Math.max(0, now - received) : 0;
       if (event.scope === 'code_task'
           || (isExecution(event) && event.stageElapsedMs + liveAge >= 15000)
@@ -106,12 +107,13 @@ export class WorkStatusStore {
           this.connected ? `Worker update ${duration(since)} ago` : 'Connection lost · last known state');
         return { id: event.runId, scope: event.scope, active, stale, label: stageLabel(event),
           elapsed: duration(elapsed), stageElapsed: duration(stageElapsed), details, history,
+          summary: event.summary ?? '', reason: event.reason ?? '', nextSteps: event.nextSteps ?? '',
           caution: stale ? 'Live status unavailable' : active && idle >= 60000 ? 'No new progress reported' : '' };
       });
   }
 }
 
-export function setupWorkStatus(host: HTMLElement, onLabel?: (label: string) => void) {
+export function setupWorkStatus(host: HTMLElement, onLabel?: (label: string, active: boolean) => void) {
   const store = new WorkStatusStore();
   const rows = new Map<string, HTMLElement>();
   const render = () => {
@@ -127,19 +129,25 @@ export function setupWorkStatus(host: HTMLElement, onLabel?: (label: string) => 
         title.setAttribute('role', 'status'); title.setAttribute('aria-live', 'polite');
         const timer = document.createElement('span'); timer.className = 'work-status-time';
         const body = document.createElement('div'); body.className = 'work-status-detail';
-        summary.append(title, timer); row.append(summary, body); host.append(row); rows.set(view.id, row);
+        const progress = document.createElement('div'); progress.className = 'work-status-progress';
+        const copy = document.createElement('span'); copy.className = 'work-status-copy';
+        copy.append(title, progress); summary.append(copy, timer); row.append(summary, body); host.append(row); rows.set(view.id, row);
       }
       row.dataset.active = String(view.active); row.dataset.stale = String(view.stale);
       const title = row.querySelector('.work-status-title')!;
       const label = `${view.scope === 'code_task' ? 'Coding goal · ' : ''}${view.label}${view.caution ? ` · ${view.caution}` : ''}`;
       if (title.textContent !== label) title.textContent = label;
       row.querySelector('.work-status-time')!.textContent = view.elapsed;
+      const progress = row.querySelector('.work-status-progress')! as HTMLElement;
+      progress.textContent = view.reason || view.summary;
+      progress.hidden = !progress.textContent;
+      progress.title = progress.textContent || '';
       row.querySelector('.work-status-detail')!.textContent =
-        `${view.label} · ${view.stageElapsed} in this stage\n${view.details.join('\n')}\n\n${view.history.join('\n')}`;
+        `${view.summary}\n${view.reason}${view.nextSteps ? `\nNext: ${view.nextSteps}` : ''}\n\n${view.label} · ${view.stageElapsed} in this stage\n${view.details.join('\n')}\n\n${view.history.join('\n')}`;
     }
     const active = views.find(v => v.active && v.scope === 'turn') ?? views.find(v => v.active);
     // Put elapsed first so the narrow headset badge cannot truncate the timer.
-    onLabel?.(active ? `${active.elapsed} · ${active.caution || active.label}` : '');
+    onLabel?.(active ? `${active.elapsed} · ${active.caution || active.label}` : '', !!active && !active.stale);
   };
   const timer = setInterval(render, 1000);
   return { store, update(event: WorkStatus) { store.update(event); render(); },

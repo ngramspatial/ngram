@@ -58,8 +58,9 @@ export class AgentStateDisplay {
   private toolName = '';
   private message = '';
   private workLabel = '';
+  private backgroundWorking = false;
 
-  setWorkLabel(label: string): void { this.workLabel = label; }
+  setWorkLabel(label: string, active = false): void { this.workLabel = label; this.backgroundWorking = active; }
   private elapsed = 0;
   private lastFrame = -1;
   private attached = false;
@@ -166,7 +167,7 @@ export class AgentStateDisplay {
       if (isAR) this.renderBadge();
     }
 
-    if (this.state === 'idle') {
+    if (this.state === 'idle' && !this.backgroundWorking) {
       if (this.spinner) this.spinner.visible = false;
       if (this.badge) {
         this.badge.visible = isAR && !!this.workLabel;

@@ -95,3 +95,17 @@ test('stale frames are ignored but a restarted goal may reset its sequence', () 
   assert.equal(store.update(event({ instanceId: 'new-worker', timestamp: 200 })), true);
   assert.equal(duration(86400000), '24h 0m');
 });
+
+test('background progress and terminal stop reasons remain visible without claiming active work', () => {
+  const store = new WorkStatusStore();
+  store.update(event({ summary: 'Built six screens; checking readability.' }), 1000);
+  assert.equal(store.views(1000)[0].summary, 'Built six screens; checking readability.');
+  store.update(event({ sequence: 2, status: 'blocked', summary: 'Screens saved.',
+    reason: 'Reconnect the original room to verify.', nextSteps: 'Inspect the tablet.' }), 2000);
+  const view = store.views(2000)[0];
+  assert.equal(view.active, false);
+  assert.equal(view.label, 'Blocked');
+  assert.equal(view.reason, 'Reconnect the original room to verify.');
+  assert.equal(view.nextSteps, 'Inspect the tablet.');
+  assert.deepEqual(store.views(122000), []);
+});

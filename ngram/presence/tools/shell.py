@@ -84,7 +84,7 @@ def _fmt_exec_result(res: dict[str, Any]) -> str:
     name="run_command",
     description="Run a shell command. You can install packages, run scripts, check system status, curl APIs — anything you'd do in a terminal.",
 )
-async def run_command(command: str, timeout: int = 30) -> str:
+async def run_command(command: str, timeout: int = 0) -> str:
     cmd = (command or "").strip()
     if not cmd:
         return json.dumps({"error": "empty command"})
@@ -92,7 +92,8 @@ async def run_command(command: str, timeout: int = 30) -> str:
     if bad:
         return json.dumps({"error": f"command blocked by denylist pattern: {bad}"})
     cfg = _shell_cfg()
-    to = int(cfg.get("timeout") or timeout or 30)
+    # Configuration supplies a default, never overrides an explicit tool deadline.
+    to = int(timeout or cfg.get("timeout") or 30)
     client = get_execution_client()
     res = await client.call("run_command", {"command": cmd, "timeout": max(1, to)})
     log.info(

@@ -56,3 +56,17 @@ test('compaction is stoppable and cancellation or disconnect resets every source
   assert.equal(control.isActive(), false);
   assert.equal(button.dataset.mode, 'send');
 });
+
+test('the send button remains available during dictation even when the agent is working', () => {
+  const { button, control, click, calls } = fixture();
+  control.update({ agentState: 'thinking', playing: true, dictating: true });
+  assert.equal(button.dataset.mode, 'send');
+  click();
+  assert.deepEqual(calls(), { sent: 1, stopped: 0 });
+  assert.equal(control.isActive(), true, 'Escape can still stop the agent');
+  control.reset();
+  control.update({ agentState: 'thinking' });
+  assert.equal(button.dataset.mode, 'send', 'agent status updates do not end dictation');
+  control.update({ dictating: false });
+  assert.equal(button.dataset.mode, 'stop');
+});

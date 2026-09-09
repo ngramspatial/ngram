@@ -105,6 +105,19 @@ def connected_spatial_session(entity: Any, inp: Any = None) -> SpatialSession | 
     sessions = getattr(entity, "_ngram_ar_sessions", None)
     if not isinstance(sessions, SpatialSessions):
         return None
+    if inp and inp.platform == "code_task":
+        metadata = inp.metadata if isinstance(inp.metadata, dict) else {}
+        route = metadata.get("code_task_spatial") or {}
+        if not route:
+            return None
+        original = sessions.select(str(route.get("session_id") or ""))
+        shell = str(route.get("shell_slug") or "")
+        if original and original.shell_slug == shell:
+            return original
+        # A browser refresh creates a new body ID. Rebind only to an unambiguous
+        # replacement of the same shell, never an unrelated/newest body.
+        candidates = [s for s in sessions.sessions.values() if s.connected and shell and s.shell_slug == shell]
+        return candidates[0] if len(candidates) == 1 else None
     # Prefer the originating body when it is connected. API/message sessions
     # can also use the ngram_ar platform without owning a renderer.
     session_id = str(inp.channel or "") if inp and inp.platform == "ngram_ar" else ""

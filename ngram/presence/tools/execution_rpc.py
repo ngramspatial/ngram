@@ -21,6 +21,7 @@ import asyncio
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -43,6 +44,44 @@ _CLIENTS: dict[
     ExecutionRPCClient,
 ] = {}
 _BG_PROCS: dict[str, dict[str, Any]] = {}
+
+
+def _run_process(command: str | list[str], *, cwd: str, timeout: float, shell: bool = False):
+    """Bound the entire command tree, including children holding inherited pipes.
+
+    Killing only a shell on timeout can leave Blender alive and communicate()
+    waiting forever. Each invocation owns its process group (or Windows tree).
+    """
+    options = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {"start_new_session": True}
+    # Files avoid unbounded in-memory logs and pipe-reader waits on descendants.
+    with tempfile.TemporaryFile() as stdout, tempfile.TemporaryFile() as stderr:
+        process = subprocess.Popen(command, cwd=cwd, shell=shell, stdout=stdout,
+                                   stderr=stderr, **options)  # noqa: S602
+        try:
+            process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired as error:
+            if os.name == "nt":
+                try:
+                    subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                                   capture_output=True, timeout=5, creationflags=subprocess.CREATE_NO_WINDOW)
+                except (OSError, subprocess.TimeoutExpired):
+                    process.kill()
+            else:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
+            raise error
+        stdout.seek(0)
+        stderr.seek(0)
+        return subprocess.CompletedProcess(command, process.returncode,
+            stdout.read(20000).decode("utf-8", errors="replace"), stderr.read(20000).decode("utf-8", errors="replace"))
+
+
 REMOTE_SESSION_RPC_ACTIONS = frozenset(
     {
         "desktop_session_start",
@@ -371,12 +410,10 @@ class ExecutionRPCClient:
                 timeout = int(payload.get("timeout") or self.timeout)
                 if not cmd:
                     return {"ok": False, "error": "empty command"}
-                p = subprocess.run(
+                p = _run_process(
                     cmd,
                     shell=True,
                     cwd=str(self.workspace_root),
-                    capture_output=True,
-                    text=True,
                     timeout=max(1, timeout),
                 )
                 res = {
@@ -584,11 +621,9 @@ class ExecutionRPCClient:
                 tmp = Path(tempfile.gettempdir()) / f"ngram_py_{uuid.uuid4().hex[:8]}.py"
                 tmp.write_text(code, encoding="utf-8")
                 try:
-                    p = subprocess.run(
+                    p = _run_process(
                         [sys.executable, str(tmp)],
                         cwd=str(self.workspace_root),
-                        capture_output=True,
-                        text=True,
                         timeout=max(1, timeout),
                     )
                     res = {
@@ -616,11 +651,9 @@ class ExecutionRPCClient:
                 tmp = Path(tempfile.gettempdir()) / f"ngram_js_{uuid.uuid4().hex[:8]}.js"
                 tmp.write_text(code, encoding="utf-8")
                 try:
-                    p = subprocess.run(
+                    p = _run_process(
                         [node, str(tmp)],
                         cwd=str(self.workspace_root),
-                        capture_output=True,
-                        text=True,
                         timeout=max(1, timeout),
                     )
                     res = {

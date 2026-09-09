@@ -12,7 +12,7 @@ import { SpeechHandler } from './speech.js';
 import { attachSlashCommands, parseSlashCommand, SLASH_COMMANDS, showCommandNotice } from './slash-commands.js';
 import { captionPages } from './speech-captions.js';
 import { setupVoiceSettings } from './voice-settings.js';
-import { mergeVoiceDraft } from './voice-draft.js';
+import { VoiceDraft } from './voice-draft.js';
 import { updateContextDisplay } from './context-status.js';
 import { setupContextWheel } from './context-wheel.js';
 import { setupResponseControl } from './response-control.js';
@@ -119,7 +119,7 @@ async function main() {
   const animPanel = new AnimationPanel();
   const behaviorPanel = new BehaviorPanel();
   const agentState = new AgentStateDisplay();
-  const workStatus = setupWorkStatus(document.getElementById("work-status")!, label => agentState.setWorkLabel(label));
+  const workStatus = setupWorkStatus(document.getElementById("work-status")!, (label, active) => agentState.setWorkLabel(label, active));
   const musicPlayer = new MusicPlayer();
   const youtubePlayer = new YouTubePlayer();
   const terminalViewer = new TerminalViewer();
@@ -843,6 +843,7 @@ async function main() {
         if (msg.shell) {
           if (msg.shell.slug) {
             const slugChanged = activeShellSlug !== msg.shell.slug;
+            if (slugChanged) speech.cancelListening();
             activeShellSlug = msg.shell.slug;
             ui.setActiveShellSlug(msg.shell.slug);
             document.querySelectorAll('.agent-card').forEach(c => {
@@ -1842,10 +1843,19 @@ async function main() {
     spatialUI.setMicState(active, camera);
     radialMenu.setMicState(active);
     wristMenu.setMicState(active);
+    responseControl.update({ dictating: active });
   }
 
   // --- Mic toggle (shared between DOM button and controller) ---
+  let micTransition = false;
   async function toggleMic() {
+    if (micTransition || finalizingDictationSend || sendingMessage) return;
+    micTransition = true;
+    try { await changeMicState(); }
+    finally { micTransition = false; }
+  }
+
+  async function changeMicState() {
     speech.ensureAudioContext();
     ambient.recordInteraction();
 
@@ -1864,17 +1874,17 @@ async function main() {
     }
 
     if (micActive) {
-      speech.stopListening();
-      micActive = false;
-      setMicAppearance(false);
+      await speech.stopListening();
     } else {
       try {
+        const draft = new VoiceDraft(ui.textInput.value, ui.textInput.selectionStart, ui.textInput.selectionEnd);
+        if (listeningMode === 'browser') ui.focusInput();
         await speech.startListening((text) => {
           if (listeningMode === 'browser') {
-            ui.textInput.value = mergeVoiceDraft(ui.textInput.value, text);
+            const next = draft.update(ui.textInput.value, text, ui.textInput.selectionStart, ui.textInput.selectionEnd);
+            ui.textInput.value = next.value;
+            ui.textInput.setSelectionRange(next.selectionStart, next.selectionEnd);
             ui.textInput.dispatchEvent(new Event('input', { bubbles: true }));
-            ui.focusInput();
-            ui.textInput.setSelectionRange(ui.textInput.value.length, ui.textInput.value.length);
             return;
           }
 
@@ -1892,8 +1902,6 @@ async function main() {
             });
           }
         }, listeningMode);
-        micActive = true;
-        setMicAppearance(true);
       } catch (err: any) {
         const errMsg = `Mic error: ${err?.message ?? err}`;
         if (xr.isARActive) {
@@ -1906,12 +1914,17 @@ async function main() {
   }
 
   // --- Mic state callback ---
+  window.addEventListener('pagehide', () => speech.cancelListening());
   speech.onListeningState((state, detail) => {
     switch (state) {
       case 'recording':
+        micActive = true;
         setMicAppearance(true);
         break;
       case 'transcribing':
+        micActive = false;
+        setMicAppearance(false);
+        responseControl.update({ dictating: true });
         if (!xr.isARActive) break;
         if (agentSpawned && agentVisible) {
           spatialUI.showThinking(avatar.getPosition());
@@ -1938,7 +1951,22 @@ async function main() {
   function notifyCommand(text: string): void { ui.addNotification(text); showCommandNotice(text); }
   const attachments = setupAttachments(ui.textInput, () => activeShellSlug, notifyCommand);
   let sendingMessage = false;
+  let finalizingDictationSend = false;
   async function sendTextMessage() {
+    if (finalizingDictationSend || sendingMessage) return;
+    finalizingDictationSend = true;
+    const shell = activeShellSlug;
+    const chat = currentChatId;
+    try {
+      // stop() is asynchronous: its final result can contain words absent from
+      // the last interim hypothesis. Read and clear the draft only afterward.
+      await speech.stopListening();
+      if (shell !== activeShellSlug || chat !== currentChatId) return;
+      await submitTextMessage();
+    } finally { finalizingDictationSend = false; }
+  }
+
+  async function submitTextMessage() {
     const text = ui.textInput.value.trim();
     if (!text && !attachments.hasFiles()) return;
     const command = parseSlashCommand(text);
@@ -2676,6 +2704,7 @@ async function main() {
   };
 
   ui.onNewChat(() => {
+    speech.cancelListening();
     attachments.clear();
     if (ui.getMessages().length > 0) {
       saveCurrentChat();
@@ -2689,6 +2718,7 @@ async function main() {
 
   ui.onChatSelect((chatId) => {
     if (chatId === currentChatId) return;
+    speech.cancelListening();
     attachments.clear();
     if (ui.getMessages().length > 0 && currentChatId) {
       saveCurrentChat();

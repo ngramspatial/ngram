@@ -13,4 +13,8 @@
 .work-status-row summary:focus-visible { outline: 2px solid currentColor; outline-offset: -3px; border-radius: 11px; }
 .work-status-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .work-status-time { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.work-status-copy { flex: 1; min-width: 0; }
+.work-status-copy .work-status-title { display: block; }
+.work-status-progress { font-size: 11px; margin-top: 3px; opacity: .8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.work-status-progress[hidden] { display: none; }
 .work-status-detail { border-top: 1px solid var(--border); white-space: pre-line; padding: 10px 14px; max-height: 200px; overflow-y: auto; overflow-wrap: anywhere; }

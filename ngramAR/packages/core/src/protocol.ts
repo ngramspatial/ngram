@@ -83,6 +83,9 @@ export interface SetAgentStateAction extends ProtocolMessage {
 /** Observed execution telemetry; never contains model reasoning or tool arguments. */
 export interface WorkStatusAction extends ProtocolMessage {
     type: "action:work_status";
+    summary?: string;
+    reason?: string;
+    nextSteps?: string;
     runId: string;
     instanceId: string;
     scope: "turn" | "code_task";

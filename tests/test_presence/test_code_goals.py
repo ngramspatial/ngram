@@ -9,7 +9,7 @@ import pytest
 from ngram.config import HarnessConfig, entity_from_dict
 from ngram.inference.types import ChatCompletionResult, ToolCallSpec
 from ngram.models import Input
-from ngram.presence.code_goals import CodeTaskManager
+from ngram.presence.code_goals import CodeTaskManager, _successful_result
 from ngram.presence.tools import agency
 from ngram.presence.tools.code_task import code_task_session
 from ngram.presence.tools.registry import ToolRegistry
@@ -427,6 +427,124 @@ def test_goal_numeric_parameters_have_numeric_tool_schemas():
     schema = registry.tool_discovery_detail("code_task_session")["parameters"]
     assert schema["properties"]["max_runtime_seconds"]["type"] == "integer"
     assert schema["properties"]["steps_per_phase"]["type"] == "integer"
+
+
+@pytest.mark.asyncio
+async def test_spatial_goal_keeps_authoring_tools_and_images_across_real_tool_rounds(tmp_path):
+    import base64
+    from ngram.inference.visual_results import VisualResult
+    from ngram.ngram_ar.spatial_sessions import SpatialSession, SpatialSessions
+    from ngram.ngram_ar.spatial_tools import register_ngram_ar_spatial_tools
+
+    entity, manager, _, _ = setup(tmp_path, [
+        calls(("ar_world", {"command": "capabilities"})),
+        calls(("ar_request_capture", {"options": {"target": "tablet"}})),
+        checkpoint("complete", evidence="e2"),
+        calls(("ar_request_capture", {"options": {"target": "tablet"}})),
+        checkpoint("complete", evidence="e3"),
+    ])
+    register_ngram_ar_spatial_tools(entity.tools)
+    image = "data:image/jpeg;base64," + base64.b64encode(b"\xff\xd8\xff" + b"image" * 20).decode()
+    dispatched = []
+
+    async def send(actions):
+        action = actions[0]
+        dispatched.append(action)
+        result = {"ok": True, "images": [{"url": image, "label": "Tablet in room"}]} if action["type"] == "action:request_capture" else {"ok": True}
+        session.acknowledge({"completedActionId": action["actionId"], "status": "completed", "result": result})
+
+    session = SpatialSession("browser", send, dict, "test-agent")
+    entity._ngram_ar_sessions = SpatialSessions()
+    entity._ngram_ar_sessions.register(session)
+    receipt = await manager.submit("Verify the tablet in Spatial", request())
+    await settle(manager)
+    state = manager.status(receipt["task_id"])
+    assert state["status"] == "complete" and state["phase"] == 2
+    assert [a["type"] for a in dispatched] == ["action:world", "action:request_capture", "action:request_capture"]
+    visual = [m["content"] for m in entity.client.prompts[2] if isinstance(m.get("content"), VisualResult)]
+    assert len(visual) == 1 and visual[0].images[0]["url"] == image
+    assert "Evidence ID: e2" in visual[0]
+    assert image not in (manager.root / f"{receipt['task_id']}.json").read_text()
+    assert state["spatial_route"] == {"session_id": "browser", "shell_slug": "test-agent"}
+
+
+def test_goal_session_rebinds_only_to_an_unambiguous_replacement_of_its_own_shell():
+    from ngram.ngram_ar.spatial_sessions import SpatialSession, SpatialSessions, connected_spatial_session
+    entity = SimpleNamespace(_ngram_ar_sessions=SpatialSessions())
+    inp = Input(text="", person_id="u", person_name="You", platform="code_task",
+                metadata={"code_task_spatial": {"session_id": "original", "shell_slug": "rook"}})
+    unrelated = SpatialSession("other", None, dict, "other-agent")
+    entity._ngram_ar_sessions.register(unrelated)
+    assert connected_spatial_session(entity, inp) is None
+    replacement = SpatialSession("refresh", None, dict, "rook")
+    entity._ngram_ar_sessions.register(replacement)
+    assert connected_spatial_session(entity, inp) is replacement
+    duplicate = SpatialSession("second-tab", None, dict, "rook")
+    entity._ngram_ar_sessions.register(duplicate)
+    assert connected_spatial_session(entity, inp) is None
+    original = SpatialSession("original", None, dict, "rook")
+    entity._ngram_ar_sessions.register(original)
+    assert connected_spatial_session(entity, inp) is original
+
+
+@pytest.mark.parametrize("result", [
+    {"status": "accepted"}, {"status": "failed", "result": {}},
+    {"status": "completed", "result": {"ok": False, "error": "missing object"}},
+    {"ok": True, "state": "working"}, {"ok": True, "state": "failed"},
+])
+def test_unfinished_or_failed_spatial_actions_are_not_completion_evidence(result):
+    assert not _successful_result(json.dumps(result))
+
+
+@pytest.mark.asyncio
+async def test_goal_progress_includes_summary_and_terminal_reason_without_another_model_call(tmp_path):
+    entity, manager, _, _ = setup(tmp_path, [
+        calls(("say", {"message": "Rendered the first screen; verifying readability next."})),
+        checkpoint("continue", summary="Screen rendered", next_steps="Inspect in the room"),
+    ])
+    reports = []
+
+    async def emit(phase, inp, *, work):
+        assert inp.person_id == request().person_id
+        reports.append(work)
+
+    entity._emit_turn_activity = emit
+    receipt = await manager.submit("Build the tablet", request(), max_phases=1)
+    await settle(manager)
+    assert any(r["summary"].startswith("Rendered the first screen") for r in reports)
+    assert reports[-1]["status"] == "paused"
+    assert "budget" in reports[-1]["reason"].lower()
+    assert reports[-1]["nextSteps"] == "Inspect in the room"
+    assert len(entity.client.prompts) == 2
+    assert manager.status(receipt["task_id"])["status"] == "paused"
+
+
+@pytest.mark.asyncio
+async def test_unexpected_runner_failure_cannot_leave_a_dead_task_marked_running(tmp_path):
+    _, manager, _, _ = setup(tmp_path, [])
+    record = {"task_id": "dead", "status": "running"}
+    manager.records["dead"] = record
+
+    async def fail():
+        raise RuntimeError("runner failed before goal cleanup")
+
+    task = asyncio.create_task(fail())
+    await asyncio.gather(task, return_exceptions=True)
+    manager._finished("dead", task)
+    assert record["status"] == "failed"
+    assert "resume" in record["reason"]
+
+
+@pytest.mark.asyncio
+async def test_cancelled_runner_before_start_cannot_leave_a_goal_queued_forever(tmp_path):
+    _, manager, _, _ = setup(tmp_path, [])
+    record = {"task_id": "cancelled", "status": "queued"}
+    manager.records["cancelled"] = record
+    task = asyncio.create_task(asyncio.sleep(1))
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+    manager._finished("cancelled", task)
+    assert record["status"] == "paused"
 
 
 @pytest.mark.asyncio

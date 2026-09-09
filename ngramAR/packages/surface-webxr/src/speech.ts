@@ -1,5 +1,6 @@
 // @ts-nocheck
 import { captionPages, captionAt } from './speech-captions.js';
+import { formatDictation } from './dictation-text.js';
 export interface SpeechPlaybackOptions {
   text?: string;
   audioData?: string;
@@ -29,8 +30,14 @@ export class SpeechHandler {
   private mediaStream: MediaStream | null = null;
   private mediaRecorder: MediaRecorder | null = null;
   private browserRecognition: any = null;
-  private browserTranscript = '';
-  private browserInterimTranscript = '';
+  private browserPrefix = '';
+  private browserResults: { text: string; final: boolean }[] = [];
+  private lastTranscript = '';
+  private recognitionEpoch = 0;
+  private restartTimer: ReturnType<typeof setTimeout> | null = null;
+  private stopTimer: ReturnType<typeof setTimeout> | null = null;
+  private stopPromise: Promise<void> | null = null;
+  private resolveStop: (() => void) | null = null;
   private listeningMode: ListeningMode | null = null;
   private audioChunks: Blob[] = [];
   private transcribeUrl: string;
@@ -38,11 +45,6 @@ export class SpeechHandler {
   private stateCallback: ListeningStateCallback | null = null;
   private analyser: AnalyserNode | null = null;
   private analyserBuf: Uint8Array | null = null;
-  private silenceTimer: ReturnType<typeof setTimeout> | null = null;
-  private maxRecordTimer: ReturnType<typeof setTimeout> | null = null;
-  private readonly SILENCE_THRESHOLD = 15;
-  private readonly SILENCE_TIMEOUT_MS = 4000;
-  private readonly MAX_RECORD_MS = 30000;
 
   private playQueue: QueuedPlay[] = [];
   private isPlaying = false;
@@ -94,65 +96,98 @@ export class SpeechHandler {
     onResult: TranscriptionCallback,
     mode: ListeningMode = 'recorded',
   ): Promise<void> {
+    if (this.stopPromise) await this.stopPromise;
     if (this.isListening) return;
+    const epoch = ++this.recognitionEpoch;
+    this.isListening = true;
     this.onTranscription = onResult;
     this.listeningMode = mode;
+    this.lastTranscript = '';
+    this.browserPrefix = '';
+    this.browserResults = [];
 
     if (mode === 'browser') {
-      this.startBrowserRecognition();
+      try {
+        this.startBrowserRecognition();
+        this.stateCallback?.('recording');
+      } catch (error) {
+        this.finishListening(false);
+        throw error;
+      }
       return;
     }
 
     if (!this.recordedSpeechSupported) {
-      this.listeningMode = null;
+      this.finishListening(false);
       throw new Error('Recorded voice input is not available in this browser.');
     }
 
     try {
-      this.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (epoch !== this.recognitionEpoch || !this.isListening) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+      this.mediaStream = stream;
     } catch (err: any) {
-      this.listeningMode = null;
+      if (epoch !== this.recognitionEpoch) return;
+      this.finishListening(false);
       throw new Error(`Mic access denied: ${err?.message ?? err}`);
     }
 
-    const ctx = this.ensureAudioContext();
-    const source = ctx.createMediaStreamSource(this.mediaStream);
-    this.analyser = ctx.createAnalyser();
-    this.analyser.fftSize = 256;
-    this.analyser.smoothingTimeConstant = 0.8;
-    source.connect(this.analyser);
-    this.analyserBuf = new Uint8Array(this.analyser.frequencyBinCount);
+    try {
+      const ctx = this.ensureAudioContext();
+      const source = ctx.createMediaStreamSource(this.mediaStream);
+      this.analyser = ctx.createAnalyser();
+      this.analyser.fftSize = 256;
+      this.analyser.smoothingTimeConstant = 0.8;
+      source.connect(this.analyser);
+      this.analyserBuf = new Uint8Array(this.analyser.frequencyBinCount);
 
-    const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-      ? 'audio/webm;codecs=opus'
-      : MediaRecorder.isTypeSupported('audio/webm')
-        ? 'audio/webm'
-        : 'audio/mp4';
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+        ? 'audio/webm;codecs=opus'
+        : MediaRecorder.isTypeSupported('audio/webm')
+          ? 'audio/webm'
+          : 'audio/mp4';
 
-    this.mediaRecorder = new MediaRecorder(this.mediaStream, { mimeType });
-    this.audioChunks = [];
+      this.mediaRecorder = new MediaRecorder(this.mediaStream, { mimeType });
+      this.audioChunks = [];
 
-    this.mediaRecorder.ondataavailable = (e) => {
-      if (e.data.size > 0) this.audioChunks.push(e.data);
-    };
+      this.mediaRecorder.ondataavailable = (e) => {
+        if (epoch === this.recognitionEpoch && e.data.size > 0) this.audioChunks.push(e.data);
+      };
 
-    this.mediaRecorder.onstop = () => {
-      if (this.audioChunks.length > 0) {
-        const blob = new Blob(this.audioChunks, { type: mimeType });
-        this.audioChunks = [];
-        this.stateCallback?.('transcribing');
-        this.sendForTranscription(blob);
-      }
-    };
+      this.mediaRecorder.onstop = async () => {
+        if (epoch !== this.recognitionEpoch) return;
+        try {
+          if (this.audioChunks.length > 0) {
+            const blob = new Blob(this.audioChunks, { type: mimeType });
+            this.audioChunks = [];
+            this.stateCallback?.('transcribing');
+            const text = await this.sendForTranscription(blob);
+            if (epoch !== this.recognitionEpoch) return;
+            if (text) this.onTranscription?.(text);
+          }
+          this.finishListening();
+        } catch (error: any) {
+          if (epoch !== this.recognitionEpoch) return;
+          this.finishListening(false);
+          this.stateCallback?.('error', error?.message || 'Transcription failed.');
+        }
+      };
+      this.mediaRecorder.onerror = () => {
+        if (epoch !== this.recognitionEpoch) return;
+        this.finishListening(false);
+        this.stateCallback?.('error', 'Microphone recording failed.');
+      };
 
-    this.mediaRecorder.start(1000);
-    this.isListening = true;
-    this.stateCallback?.('recording');
-
-    this.startSilenceDetection();
-    this.maxRecordTimer = setTimeout(() => {
-      if (this.isListening) this.stopListening();
-    }, this.MAX_RECORD_MS);
+      this.mediaRecorder.start(1000);
+      this.stateCallback?.('recording');
+      // A pause is not a request to send. Recording ends only on an explicit stop.
+    } catch (error) {
+      this.finishListening(false);
+      throw error;
+    }
   }
 
   /**
@@ -167,123 +202,157 @@ export class SpeechHandler {
     }
 
     const recognition = new Recognition();
-    recognition.continuous = false;
+    recognition.continuous = true;
     recognition.interimResults = true;
     recognition.maxAlternatives = 1;
     recognition.lang = navigator.language || 'en-US';
 
     this.browserRecognition = recognition;
-    this.browserTranscript = '';
-    this.browserInterimTranscript = '';
+    this.browserResults = [];
 
     recognition.onresult = (event: any) => {
-      let interim = '';
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const text = String(event.results[i]?.[0]?.transcript ?? '');
-        if (event.results[i].isFinal) this.browserTranscript += `${text} `;
-        else interim += text;
+      if (recognition !== this.browserRecognition) return;
+      // Results are cumulative within this recognition run. Interim entries can
+      // be replaced or removed, so appending resultIndex onward duplicates text.
+      this.browserResults = [];
+      for (let i = 0; i < event.results.length; i++) {
+        this.browserResults.push({
+          text: String(event.results[i]?.[0]?.transcript ?? ''),
+          final: Boolean(event.results[i].isFinal),
+        });
       }
-      this.browserInterimTranscript = interim;
+      this.publishBrowserTranscript(false);
     };
 
     recognition.onerror = (event: any) => {
       if (recognition !== this.browserRecognition) return;
       const code = String(event?.error ?? 'unknown');
+      // Silence regularly ends a browser recognition service session. Keep the
+      // user's mic session alive; onend will start another service session.
+      if (code === 'no-speech' || (code === 'aborted' && !this.isListening)) return;
       const messages: Record<string, string> = {
         'audio-capture': 'No working microphone was found.',
         'not-allowed': 'Microphone permission was denied.',
         'service-not-allowed': 'Browser speech recognition is disabled.',
         'network': 'The browser speech service could not be reached.',
-        'no-speech': 'No speech was detected.',
       };
-      this.finishBrowserRecognition(false, false);
+      this.publishBrowserTranscript(true);
+      this.finishListening(false);
       this.stateCallback?.('error', messages[code] ?? `Voice recognition failed (${code}).`);
     };
 
     recognition.onend = () => {
       if (recognition !== this.browserRecognition) return;
-      this.finishBrowserRecognition(true);
+      this.publishBrowserTranscript(true);
+      if (!this.isListening) {
+        this.finishListening();
+        return;
+      }
+      this.browserPrefix = this.lastTranscript;
+      this.browserResults = [];
+      this.browserRecognition = null;
+      const epoch = this.recognitionEpoch;
+      this.restartTimer = setTimeout(() => {
+        this.restartTimer = null;
+        if (!this.isListening || epoch !== this.recognitionEpoch) return;
+        try { this.startBrowserRecognition(); }
+        catch {
+          this.finishListening(false);
+          this.stateCallback?.('error', 'Could not restart voice input. Tap the microphone to try again.');
+        }
+      }, 300);
     };
 
     try {
       recognition.start();
-      this.isListening = true;
-      this.stateCallback?.('recording');
     } catch (err) {
-      this.finishBrowserRecognition(false, false);
+      this.browserRecognition = null;
       throw err;
     }
   }
 
-  private finishBrowserRecognition(deliverTranscript: boolean, notifyIdle = true): void {
-    const text = (this.browserTranscript || this.browserInterimTranscript).trim();
-    this.browserRecognition = null;
-    this.browserTranscript = '';
-    this.browserInterimTranscript = '';
-    this.listeningMode = null;
-    this.isListening = false;
-
-    if (deliverTranscript && text) {
-      this.stateCallback?.('transcribing');
+  private publishBrowserTranscript(complete: boolean): void {
+    const language = navigator.language || 'en-US';
+    const parts: string[] = [];
+    let interim = '';
+    for (const result of this.browserResults) {
+      if (result.final) parts.push(formatDictation(result.text, true, language));
+      else interim += `${result.text} `;
+    }
+    if (interim.trim()) parts.push(formatDictation(interim, complete, language));
+    const text = [this.browserPrefix, ...parts].filter(Boolean).join(' ');
+    if (text !== this.lastTranscript) {
+      this.lastTranscript = text;
       this.onTranscription?.(text);
     }
-    if (notifyIdle) this.stateCallback?.('idle');
   }
 
-  private startSilenceDetection(): void {
-    if (!this.analyser) return;
-    const buf = new Uint8Array(this.analyser.frequencyBinCount);
-    let silentSince: number | null = null;
+  /** Abandon capture when leaving its scene; never submit it to another agent. */
+  cancelListening(): void {
+    this.finishListening();
+  }
 
-    const check = () => {
-      if (!this.isListening || !this.analyser) return;
-      this.analyser.getByteFrequencyData(buf);
-      const avg = buf.reduce((a, b) => a + b, 0) / buf.length;
-
-      if (avg < this.SILENCE_THRESHOLD) {
-        if (!silentSince) silentSince = Date.now();
-        else if (Date.now() - silentSince > this.SILENCE_TIMEOUT_MS) {
-          this.stopListening();
-          return;
-        }
-      } else {
-        silentSince = null;
+  /** Resolves after the final words are delivered, before callers clear/send a draft. */
+  stopListening(): Promise<void> {
+    if (this.stopPromise) return this.stopPromise;
+    if (!this.listeningMode) return Promise.resolve();
+    const pending = new Promise<void>((resolve) => { this.resolveStop = resolve; });
+    this.stopPromise = pending;
+    this.isListening = false;
+    if (this.restartTimer) { clearTimeout(this.restartTimer); this.restartTimer = null; }
+    this.stateCallback?.('transcribing');
+    if (this.listeningMode === 'browser') {
+      if (!this.browserRecognition) {
+        this.finishListening();
+        return pending;
       }
-
-      this.silenceTimer = setTimeout(check, 200);
-    };
-    check();
-  }
-
-  stopListening(): void {
-    if (this.listeningMode === 'browser' && this.browserRecognition) {
-      this.isListening = false;
+      // Some browser services never send onend after stop. Keep the latest
+      // visible hypothesis and fence late events instead of hanging Send.
+      this.stopTimer = setTimeout(() => {
+        this.publishBrowserTranscript(true);
+        this.finishListening();
+      }, 1500);
       try {
         this.browserRecognition.stop();
       } catch {
-        this.finishBrowserRecognition(true);
+        this.publishBrowserTranscript(true);
+        this.finishListening();
       }
-      return;
-    }
-
-    this.isListening = false;
-    if (this.silenceTimer) { clearTimeout(this.silenceTimer); this.silenceTimer = null; }
-    if (this.maxRecordTimer) { clearTimeout(this.maxRecordTimer); this.maxRecordTimer = null; }
-    if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
+    } else if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
       this.mediaRecorder.stop();
+      this.mediaStream?.getTracks().forEach((track) => track.stop());
+    } else {
+      this.finishListening();
     }
-    if (this.mediaStream) {
-      this.mediaStream.getTracks().forEach((t) => t.stop());
-      this.mediaStream = null;
+    return pending;
+  }
+
+  private finishListening(notifyIdle = true): void {
+    ++this.recognitionEpoch;
+    this.isListening = false;
+    if (this.restartTimer) { clearTimeout(this.restartTimer); this.restartTimer = null; }
+    if (this.stopTimer) { clearTimeout(this.stopTimer); this.stopTimer = null; }
+    const recognition = this.browserRecognition;
+    this.browserRecognition = null;
+    try { recognition?.abort(); } catch { /* already ended */ }
+    if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
+      try { this.mediaRecorder.stop(); } catch { /* already stopped */ }
     }
+    this.mediaStream?.getTracks().forEach((track) => track.stop());
+    this.mediaStream = null;
     this.mediaRecorder = null;
+    this.audioChunks = [];
     this.analyser = null;
     this.analyserBuf = null;
     this.listeningMode = null;
-    this.stateCallback?.('idle');
+    this.onTranscription = null;
+    if (notifyIdle) this.stateCallback?.('idle');
+    this.resolveStop?.();
+    this.resolveStop = null;
+    this.stopPromise = null;
   }
 
-  private async sendForTranscription(blob: Blob): Promise<void> {
+  private async sendForTranscription(blob: Blob): Promise<string> {
     try {
       const formData = new FormData();
       const ext = blob.type.includes('webm') ? 'webm' : 'mp4';
@@ -300,19 +369,14 @@ export class SpeechHandler {
           ? payload.error
           : `Transcription failed (${res.status}).`;
         console.warn('[speech] transcription failed:', res.status, detail);
-        this.stateCallback?.('error', detail);
-        return;
+        throw new Error(detail);
       }
 
       const data = await res.json();
-      if (data.text && data.text.trim()) {
-        this.onTranscription?.(data.text.trim());
-      }
-    } catch (err) {
+      return typeof data.text === 'string' ? data.text.trim() : '';
+    } catch (err: any) {
       console.warn('[speech] transcription error:', err);
-      this.stateCallback?.('error', 'The transcription service could not be reached.');
-    } finally {
-      this.stateCallback?.('idle');
+      throw new Error(err?.message || 'The transcription service could not be reached.');
     }
   }
 
@@ -567,15 +631,7 @@ export class SpeechHandler {
 
   dispose(): void {
     this.stopPlayback();
-    if (this.browserRecognition) {
-      const recognition = this.browserRecognition;
-      this.browserRecognition = null;
-      try { recognition.abort(); } catch { /* already stopped */ }
-      this.isListening = false;
-      this.listeningMode = null;
-    } else {
-      this.stopListening();
-    }
+    this.cancelListening();
     this.audioContext?.close();
   }
 }
