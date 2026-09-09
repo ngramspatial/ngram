@@ -89,3 +89,57 @@ test('browser boundaries advance captions and duplicate end/error events finish 
   assert.equal(ended, 1);
   assert.equal(ticks.size, 0);
 });
+
+test('goal milestones replace unspoken progress and completion remains one queued result', t => {
+  const { speech, decodes, sources } = audioHarness(t);
+  const ended = [], started = [];
+  const play = (text, notification) => speech.playResponse({ text, audioData: 'AA==', notification,
+    onStart: () => started.push(text) }, cancelled => ended.push([text, !!cancelled]));
+  play('User answer'); decodes.shift().ok({ duration: 30 });
+  play('Old progress', { goalId: 'a', kind: 'progress' });
+  play('Other goal', { goalId: 'b', kind: 'progress' });
+  play('New progress', { goalId: 'a', kind: 'progress' });
+  assert.deepEqual(ended, [['Old progress', true]]);
+  play('Verified result', { goalId: 'a', kind: 'terminal' });
+  assert.deepEqual(ended.at(-1), ['New progress', true]);
+  speech.discardQueuedNotice('a'); // A terminal work-status event cannot drop completion.
+  sources[0].onended(); decodes.shift().ok({ duration: 3 });
+  sources[1].onended(); decodes.shift().ok({ duration: 3 });
+  sources[2].onended();
+  assert.deepEqual(started, ['User answer', 'Other goal', 'Verified result']);
+  assert.equal(ended.filter(([text]) => text === 'Verified result').length, 1);
+});
+
+test('ordinary replies discard stale goal chatter while preserving conversation and final results', t => {
+  const { speech, decodes, sources } = audioHarness(t);
+  const started = [], cancelled = [];
+  const play = (text, notification) => speech.playResponse({ text, audioData: 'AA==', notification,
+    onStart: () => started.push(text) }, value => { if (value) cancelled.push(text); });
+  play('First reply'); decodes.shift().ok({ duration: 10 });
+  play('Progress', { goalId: 'a', kind: 'progress' });
+  play('Final result', { goalId: 'b', kind: 'terminal' });
+  play('Second reply');
+  assert.deepEqual(cancelled, ['Progress']);
+  sources[0].onended(); decodes.shift().ok({ duration: 1 });
+  sources[1].onended(); decodes.shift().ok({ duration: 1 });
+  sources[2].onended();
+  assert.deepEqual(started, ['First reply', 'Final result', 'Second reply']);
+});
+
+test('old queued milestones expire and cancellation drops only that goal progress', t => {
+  const { speech, decodes, sources } = audioHarness(t);
+  let now = 1000;
+  t.mock.method(Date, 'now', () => now);
+  const cancelled = [], started = [];
+  const play = (text, notification) => speech.playResponse({ text, audioData: 'AA==', notification,
+    onStart: () => started.push(text) }, value => { if (value) cancelled.push(text); });
+  play('Long answer'); decodes.shift().ok({ duration: 120 });
+  play('Cancelled goal', { goalId: 'cancel', kind: 'progress' });
+  play('Aging update', { goalId: 'slow', kind: 'progress' });
+  speech.discardQueuedNotice('cancel');
+  now += 91000;
+  sources[0].onended();
+  assert.deepEqual(started, ['Long answer']);
+  assert.deepEqual(cancelled, ['Cancelled goal', 'Aging update']);
+  assert.equal(decodes.length, 0);
+});

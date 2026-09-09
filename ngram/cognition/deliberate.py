@@ -340,6 +340,9 @@ class DeliberateCognition:
         tool_executor: Callable[[ToolCallSpec], Awaitable[str]] | None = None,
         inference_profile: InferenceProfile = "deliberate",
         final_checker: FinalCheck | None = None,
+        stop_after_tools: Callable[[], bool] | None = None,
+        tool_continuation: str | None = None,
+        budget_handoff: str | None = None,
     ) -> AsyncIterator[DeliberateStreamEvent]:
         """Primary bounded agent loop for one user turn."""
         model, max_toks, think_flag, temperature = self._inference_params(inference_profile)
@@ -379,7 +382,11 @@ class DeliberateCognition:
         _messages_sent_to_user: list[str] = []
         delivered_reply = False
         step_idx = 0
+        handoff_requested = False
         while step_idx < loop_state.step_budget and step_idx < hard_step_cap:
+            if budget_handoff and not handoff_requested and hard_step_cap - step_idx <= 2:
+                msgs = msgs + [{"role": "user", "content": budget_handoff}]
+                handoff_requested = True
             from ngram.inference.factory import effective_inference_provider_name
             self.latest_context_status = {
                 "phase": "usage", "source": "prompt", "model": model,
@@ -447,6 +454,17 @@ class DeliberateCognition:
                         }
                     )
                 loop_state.last_tool_failed = tool_failed
+
+                # Durable workers own their transitions. A validated handoff ends
+                # the phase here, without another model call merely to end_turn.
+                if stop_after_tools is not None and stop_after_tools():
+                    yield DeliberateStreamEvent(
+                        kind="final", display_text="",
+                        history_entries=text_history([assistant_msg] + tool_msgs),
+                        merged_thinking="\n\n".join(thinking_acc) or None,
+                        last_result=res,
+                    )
+                    return
 
                 delivered_reply = delivered_reply or any(
                     tc.name in {"say", "ar_speak"}
@@ -556,7 +574,7 @@ class DeliberateCognition:
 
                 follow_user = {
                     "role": "user",
-                    "content": _build_post_tool_nudge(
+                    "content": tool_continuation or _build_post_tool_nudge(
                         res.tool_calls, tool_msgs, _inp.text,
                         already_sent=_messages_sent_to_user if _messages_sent_to_user else None,
                     ),

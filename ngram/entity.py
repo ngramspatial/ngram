@@ -1241,6 +1241,7 @@ class Entity:
             self.tools.register_decorated(code_task_tools.code_task_session)
             self.tools.register_decorated(code_task_tools.code_task_status)
             self.tools.register_decorated(code_task_tools.code_task_resume)
+            self.tools.register_decorated(code_task_tools.code_task_steer)
             self.tools.register_decorated(code_task_tools.code_task_cancel)
         self.tools.register_decorated(web_tools.search_web)
         self.tools.register_decorated(web_tools.fetch_url)

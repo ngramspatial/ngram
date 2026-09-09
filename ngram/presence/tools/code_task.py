@@ -36,9 +36,9 @@ def manager_for(entity):
     return manager
 
 
-@tool("code_task_session", "Launch a durable background coding goal and return its task_id immediately. Supply a self-contained objective, repository context, success criteria, and authorization constraints. Loops through implementation and fresh verification until complete, blocked, cancelled, or paused for budget. Survives browser disconnects; saved goals recover on worker startup. max_phases=0 means no phase-count limit; runtime defaults to six hours. Use code_task_status/resume/cancel to manage it. Never poll in a loop or wait inside the launching chat turn.")
+@tool("code_task_session", "Launch a durable background coding goal and return its task_id immediately. Supply a self-contained objective, repository context, success criteria, and authorization constraints. Uses explicit implementation/review/completion transitions; stops on an external blocker until resumed. Survives browser disconnects; saved goals recover on worker startup. max_phases=0 means no phase-count limit; runtime defaults to six hours. Use code_task_steer for new guidance while active; status/resume/cancel manage the goal. Never poll in a loop or wait inside the launching chat turn.")
 async def code_task_session(
-    objective: str, max_phases: int = 0, steps_per_phase: int = 24,
+    objective: str, max_phases: int = 0, steps_per_phase: int = 64,
     task_record_path: str = "", success_criteria: str = "", max_runtime_seconds: int = 21600,
 ) -> str:
     ctx = require_tool_runtime()
@@ -61,6 +61,11 @@ async def code_task_resume(task_id: str, instructions: str = "", additional_seco
     return json.dumps(await manager_for(require_tool_runtime().entity).resume(
         task_id, instructions, additional_seconds,
     ), ensure_ascii=False)
+
+
+@tool("code_task_steer", "Give new user guidance to an ACTIVE goal without cancelling or restarting it. Saves instructions immediately; an in-flight tool finishes, and stale later tool calls are fenced before work resumes from the updated context. Use resume for a stopped goal.")
+async def code_task_steer(task_id: str, instructions: str) -> str:
+    return json.dumps(await manager_for(require_tool_runtime().entity).steer(task_id, instructions), ensure_ascii=False)
 
 
 @tool("code_task_cancel", "Cancel a coding goal. Stops scheduling new work; an already executing tool is allowed to finish. Saved work and evidence remain available.")

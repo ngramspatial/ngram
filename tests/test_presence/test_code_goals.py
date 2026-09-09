@@ -35,11 +35,13 @@ class Provider:
     def __init__(self, responses):
         self.responses = list(responses)
         self.prompts = []
+        self.tool_sets = []
         self.entered = asyncio.Event()
         self.release = None
 
     async def chat_completion(self, _model, messages, **_kwargs):
         self.prompts.append(messages)
+        self.tool_sets.append({t["function"]["name"]: t["function"] for t in _kwargs.get("tools", [])})
         self.entered.set()
         if self.release is not None:
             await self.release.wait()
@@ -99,6 +101,385 @@ async def settle(manager):
 
 def request():
     return Input(text="Fix the parser in repo; preserve other edits", person_id="u", person_name="You", channel="browser", platform="ngram_ar")
+
+
+def transition(name, **args):
+    return calls((name, args))
+
+
+@pytest.mark.asyncio
+async def test_explicit_work_review_fix_review_completion_without_extra_end_turn_calls(tmp_path):
+    entity, manager, _, operations = setup(tmp_path, [
+        calls(("run_command", {"command": "implementation tests"})),
+        transition("goal_submit_for_verification", summary="Parser implemented", evidence=["e1"]),
+        calls(("run_command", {"command": "fail"})),
+        transition("goal_request_changes", summary="Empty input fails", next_steps="Handle empty input"),
+        calls(("run_command", {"command": "fixed tests"})),
+        transition("goal_submit_for_verification", summary="Empty input fixed", evidence=["e3"]),
+        calls(("run_command", {"command": "review current parser"})),
+        transition("goal_complete", summary="Criteria verified", evidence=["e4"], message="Parser fixed and verified."),
+    ])
+    receipt = await manager.submit("Fix parser", request())
+    await settle(manager)
+    state = manager.status(receipt["task_id"])
+    assert state["status"] == "complete" and state["phase"] == 4
+    assert operations == ["implementation tests", "fail", "fixed tests", "review current parser"]
+    assert len(entity.client.prompts) == 8, "validated transitions must not spend a model call on end_turn"
+    assert "goal_complete" not in entity.client.tool_sets[0]
+    assert "goal_submit_for_verification" not in entity.client.tool_sets[2]
+    assert "write_file" not in entity.client.tool_sets[2]
+    assert all("say" not in tools and "code_task_checkpoint" not in tools for tools in entity.client.tool_sets)
+    assert "use say() to share findings" not in json.dumps(entity.client.prompts)
+    assert state["final_message"] == "Parser fixed and verified."
+
+
+@pytest.mark.asyncio
+async def test_verification_handoff_preserves_mode_notes_and_requires_fresh_evidence(tmp_path):
+    entity, manager, _, _ = setup(tmp_path, [
+        calls(("run_command", {"command": "implementation checked"})),
+        transition("goal_submit_for_verification", summary="Ready", evidence=["e1"], notes="Do not rebuild; inspect parser.py", artifacts=["parser.py"]),
+        transition("goal_complete", summary="Premature", evidence=["e1"]),
+        calls(("run_command", {"command": "review first criterion"})),
+        transition("goal_checkpoint", summary="First criterion verified", next_steps="Inspect empty input", notes="First criterion passed; empty input remains", evidence=["e2"]),
+        calls(("run_command", {"command": "review empty input"})),
+        transition("goal_complete", summary="Both criteria verified", evidence=["e2", "e3"]),
+    ])
+    receipt = await manager.submit("Fix parser", request())
+    await settle(manager)
+    state = manager.status(receipt["task_id"])
+    assert state["status"] == "complete" and state["phase"] == 3
+    context = json.loads(entity.client.prompts[5][1]["content"].split("\n", 1)[1])
+    assert context["working_notes"] == "First criterion passed; empty input remains"
+    assert context["artifacts"] == ["parser.py"]
+    assert "goal_complete" in entity.client.tool_sets[5]
+    assert "goal_request_changes" in entity.client.tool_sets[5]
+
+
+@pytest.mark.asyncio
+async def test_transition_fences_later_mutations_in_same_model_batch(tmp_path):
+    _, manager, _, operations = setup(tmp_path, [
+        calls(("run_command", {"command": "tests"})),
+        calls(("goal_submit_for_verification", {"summary": "Ready", "evidence": ["e1"]}),
+              ("write_file", {"path": "must-not-write", "content": "bad"})),
+        calls(("run_command", {"command": "review"})),
+        transition("goal_complete", summary="Verified", evidence=["e2"]),
+    ])
+    receipt = await manager.submit("Fix parser", request())
+    await settle(manager)
+    assert manager.status(receipt["task_id"])["status"] == "complete"
+    assert operations == ["tests", "review"]
+
+
+@pytest.mark.asyncio
+async def test_repeated_timer_observations_do_not_reset_progress_guard(tmp_path):
+    responses = []
+    for _ in range(4):
+        responses += [calls(("run_command", {"command": "inspect timer"})),
+                      transition("goal_checkpoint", summary="Still inspecting", next_steps="Inspect timer again")]
+    entity, manager, _, _ = setup(tmp_path, responses)
+    sequence = 0
+
+    async def timer(command: str):
+        nonlocal sequence
+        sequence += 1
+        return json.dumps({"ok": True, "exit_code": 0, "stdout": f"timer={sequence}"})
+
+    entity.tools.register_fn("run_command", "Inspect", timer)
+    receipt = await manager.submit("Fix parser", request())
+    await settle(manager)
+    state = manager.status(receipt["task_id"])
+    assert state["status"] == "paused" and state["phase"] == 4
+    assert len(entity.client.prompts) == 8
+    assert state["stalled_phases"] == 3
+    assert "repeated observations" in state["reason"]
+
+
+@pytest.mark.asyncio
+async def test_reassurance_only_loop_stops_within_one_phase(tmp_path):
+    entity, manager, _, _ = setup(tmp_path, [
+        transition("goal_progress", message=message)
+        for message in ["Checking now", "Still checking", "Continuing the check"]
+    ])
+    receipt = await manager.submit("Fix parser", request())
+    await settle(manager)
+    state = manager.status(receipt["task_id"])
+    assert state["status"] == "paused" and state["phase"] == 1
+    assert len(entity.client.prompts) == 3 and state["sequence"] == 0
+    assert "repeated status" in state["reason"]
+
+
+@pytest.mark.asyncio
+async def test_repeated_tool_polling_stops_within_one_phase(tmp_path):
+    entity, manager, _, _ = setup(tmp_path, [
+        calls(("run_command", {"command": "inspect clock"})) for _ in range(7)
+    ])
+    tick = 0
+
+    async def clock(command: str):
+        nonlocal tick
+        tick += 1
+        return json.dumps({"exit_code": 0, "stdout": f"clock={tick}"})
+
+    entity.tools.register_fn("run_command", "Inspect clock", clock)
+    receipt = await manager.submit("Fix parser", request(), steps_per_phase=64)
+    await settle(manager)
+    state = manager.status(receipt["task_id"])
+    assert state["status"] == "paused" and state["phase"] == 1
+    assert len(entity.client.prompts) == 7
+    assert "Six tool rounds repeated" in state["reason"]
+
+
+@pytest.mark.asyncio
+async def test_changed_tool_outcome_resets_polling_guard(tmp_path):
+    responses = [calls(("run_command", {"command": "inspect test"})) for _ in range(7)]
+    responses += [transition("goal_submit_for_verification", summary="Tests pass", evidence=["e7"]),
+                  calls(("run_command", {"command": "review"})),
+                  transition("goal_complete", summary="Verified", evidence=["e8"])]
+    entity, manager, _, _ = setup(tmp_path, responses)
+    tick = 0
+
+    async def test_result(command: str):
+        nonlocal tick
+        tick += 1
+        return json.dumps({"exit_code": 1 if tick < 7 else 0})
+
+    entity.tools.register_fn("run_command", "Inspect tests", test_result)
+    receipt = await manager.submit("Fix parser", request())
+    await settle(manager)
+    assert manager.status(receipt["task_id"])["status"] == "complete"
+
+
+@pytest.mark.asyncio
+async def test_steering_during_inference_fences_stale_response_and_preserves_context(tmp_path):
+    entity, manager, _, operations = setup(tmp_path, [
+        calls(("write_file", {"path": "stale.txt", "content": "old instructions"})),
+        transition("goal_checkpoint", summary="Applied guidance", next_steps="Verify new constraint", notes="Keep the existing tablet"),
+    ])
+    entity.client.release = asyncio.Event()
+    receipt = await manager.submit("Fix parser", request(), max_phases=2)
+    await entity.client.entered.wait()
+    answer = await manager.steer(receipt["task_id"], "Preserve the tablet; tokens on chain 4663 only")
+    assert answer["ok"]
+    entity.client.release.set()
+    await settle(manager)
+    assert operations == []
+    assert "tokens on chain 4663 only" in entity.client.prompts[1][1]["content"]
+    state = manager.status(receipt["task_id"])
+    assert state["status"] == "paused" and state["working_notes"] == "Keep the existing tablet"
+    assert state["task_record"] == receipt["task_record"]
+
+
+@pytest.mark.asyncio
+async def test_steering_during_tool_finishes_it_but_fences_rest_of_batch(tmp_path):
+    entity, manager, _, operations = setup(tmp_path, [
+        calls(("run_command", {"command": "started"}), ("run_command", {"command": "stale second command"})),
+        transition("goal_checkpoint", summary="Guidance applied", next_steps="Continue safely"),
+    ])
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def command(command: str):
+        operations.append(command)
+        entered.set()
+        await release.wait()
+        return '{"ok":true,"exit_code":0}'
+
+    entity.tools.register_fn("run_command", "Run", command)
+    receipt = await manager.submit("Fix parser", request(), max_phases=2)
+    await entered.wait()
+    await manager.steer(receipt["task_id"], "New constraint: no further edits")
+    release.set()
+    await settle(manager)
+    state = manager.status(receipt["task_id"])
+    assert operations == ["started"]
+    assert state["in_flight"] is None and state["sequence"] == 1
+    assert "New constraint" in entity.client.prompts[1][1]["content"]
+
+
+@pytest.mark.asyncio
+async def test_evidence_survives_recent_window_eviction_and_restart(tmp_path):
+    responses = [calls(*[("run_command", {"command": f"inspect artifact {i}"}) for i in range(85)]),
+                 transition("goal_checkpoint", summary="Artifacts inspected", next_steps="Review first artifact", evidence=["e1"])]
+    entity, manager, files, _ = setup(tmp_path, responses)
+    receipt = await manager.submit("Inspect artifacts", request(), max_phases=1)
+    await settle(manager)
+    record = manager.records[receipt["task_id"]]
+    assert len(record["receipts"]) == 80 and record["receipts"][0]["id"] == "e6"
+    restored = CodeTaskManager(entity, root=manager.root, client=files)
+    restored.start()
+    assert restored.evidence(restored.records[receipt["task_id"]], "e1")["result"].find("artifact 0") >= 0
+    with pytest.raises(ValueError):
+        restored.evidence(record, "../../secret")
+    entity.client.responses = [
+        transition("goal_read_evidence", ids=["e1"]),
+        transition("goal_submit_for_verification", summary="Ready", evidence=["e1"]),
+    ]
+    await restored.resume(receipt["task_id"])
+    await settle(restored)
+    assert restored.status(receipt["task_id"])["mode"] == "verify"
+    assert "artifact 0" in json.dumps(entity.client.prompts[-1])
+
+
+@pytest.mark.asyncio
+async def test_recovery_applies_saved_submit_without_repeating_implementation(tmp_path):
+    from ngram.presence.code_goal_phase import GoalPhase
+    from ngram.presence.code_goals import _ALLOW
+
+    entity, manager, files, operations = setup(tmp_path, [
+        calls(("run_command", {"command": "implementation checked"})), checkpoint(),
+    ])
+    receipt = await manager.submit("Fix parser", request(), max_phases=1)
+    await settle(manager)
+    record = manager.records[receipt["task_id"]]
+    record.update(status="running", max_phases=0, phase=2)
+    phase = GoalPhase(manager, record, _ALLOW)
+    assert json.loads(phase.transition("submit", "Implementation ready", evidence=["e1"]))["ok"]
+    entity.client.responses = [calls(("run_command", {"command": "fresh verification"})),
+                               transition("goal_complete", summary="Verified", evidence=["e2"])]
+    restored = CodeTaskManager(entity, root=manager.root, client=files)
+    restored.start()
+    await settle(restored)
+    state = restored.status(receipt["task_id"])
+    assert state["status"] == "complete" and state["phase"] == 3
+    assert operations == ["implementation checked", "fresh verification"]
+    assert "VERIFICATION" in entity.client.prompts[-2][1]["content"]
+
+
+def test_result_outcomes_distinguish_acceptance_running_services_and_finished_work():
+    from ngram.presence.code_goal_protocol import observation
+
+    accepted = observation("ar_world", {"command": "inspect"}, '{"status":"accepted","result":{"ok":true}}')
+    assert accepted["outcome"] == "accepted" and not accepted["evidence"]
+    running = observation("check_process", {}, '{"ok":true,"running":true,"exit_code":null}')
+    assert running["outcome"] == "running" and running["success"] and running["evidence"]
+    launched = observation("run_background", {}, '{"ok":true,"exit_code":null,"process_id":"bg_x"}')
+    assert launched["success"] and not launched["evidence"]
+    failed = observation("run_command", {}, '{"ok":true,"exit_code":1}')
+    assert failed["outcome"] == "failed" and not failed["success"]
+
+
+@pytest.mark.asyncio
+async def test_progress_separates_visible_status_from_proven_milestones_and_one_final_result(tmp_path):
+    from ngram.ngram_ar.spatial_sessions import SpatialSession, SpatialSessions
+
+    entity, manager, _, _ = setup(tmp_path, [
+        transition("goal_progress", message="Inspecting the parser"),
+        calls(("run_command", {"command": "parser tests pass"})),
+        transition("goal_progress", message="Parser tests pass.", milestone_id="parser-tested", evidence=["e1"]),
+        transition("goal_progress", message="The parser tests are passing.", milestone_id="parser-tested", evidence=["e1"]),
+        calls(("run_command", {"command": "integration test passes"})),
+        transition("goal_progress", message="Integration passes.", milestone_id="integration-tested", evidence=["e2"]),
+        transition("goal_submit_for_verification", summary="Implementation done with detailed receipts", evidence=["e1", "e2"]),
+        calls(("run_command", {"command": "fresh review"})),
+        transition("goal_complete", summary="Long technical review. " * 100, evidence=["e3"], message="The parser is fixed and verified."),
+    ])
+    sent, activity = [], []
+
+    async def send(actions):
+        sent.extend(actions)
+        session.acknowledge({"completedActionId": actions[0]["actionId"], "status": "accepted"})
+
+    async def emit(_phase, _inp, **kwargs):
+        activity.append(kwargs.get("work", {}))
+
+    entity._emit_turn_activity = emit
+    session = SpatialSession("browser", send, dict, "rook")
+    entity._ngram_ar_sessions = SpatialSessions()
+    entity._ngram_ar_sessions.register(session)
+    receipt = await manager.submit("Fix parser", request())
+    await settle(manager)
+    state = manager.status(receipt["task_id"])
+    assert state["status"] == "complete"
+    assert [s["text"] for s in sent] == ["Parser tests pass.", "The parser is fixed and verified."]
+    assert [s["notification"]["kind"] for s in sent] == ["progress", "terminal"]
+    assert any(e.get("summary") == "Integration passes." for e in activity), "cooldown must not hide visible progress"
+    assert state["summary"].startswith("Long technical review")
+    assert len(state["last_spatial_notification"]) < 100
+
+
+@pytest.mark.asyncio
+async def test_recovered_completion_does_not_call_model_or_announce_twice(tmp_path):
+    from ngram.presence.code_goal_phase import GoalPhase
+    from ngram.presence.code_goals import _ALLOW
+
+    entity, manager, files, _ = setup(tmp_path, [calls(("run_command", {"command": "review"})), checkpoint()])
+    receipt = await manager.submit("Fix parser", request(), max_phases=1)
+    await settle(manager)
+    record = manager.records[receipt["task_id"]]
+    record.update(status="verifying", mode="verify", last_applied_phase=0)
+    phase = GoalPhase(manager, record, _ALLOW)
+    assert json.loads(phase.transition("complete", "Verified current files", evidence=["e1"], message="Fixed."))["ok"]
+    entity.client.responses = []
+    count = len(entity.client.prompts)
+    restored = CodeTaskManager(entity, root=manager.root, client=files)
+    restored.start()
+    await settle(restored)
+    assert restored.status(receipt["task_id"])["status"] == "complete"
+    assert len(entity.client.prompts) == count
+    again = CodeTaskManager(entity, root=manager.root, client=files)
+    again.start()
+    assert not again.tasks
+
+
+@pytest.mark.asyncio
+async def test_cancellation_wins_over_a_saved_but_unapplied_transition_on_restart(tmp_path):
+    from ngram.presence.code_goal_phase import GoalPhase
+    from ngram.presence.code_goals import _ALLOW
+
+    entity, manager, files, _ = setup(tmp_path, [calls(("run_command", {"command": "review"})), checkpoint()])
+    receipt = await manager.submit("Fix parser", request(), max_phases=1)
+    await settle(manager)
+    record = manager.records[receipt["task_id"]]
+    record.update(status="verifying", mode="verify", last_applied_phase=0)
+    phase = GoalPhase(manager, record, _ALLOW)
+    assert json.loads(phase.transition("complete", "Verified", evidence=["e1"]))["ok"]
+    await manager.cancel(receipt["task_id"])
+    restored = CodeTaskManager(entity, root=manager.root, client=files)
+    restored.start()
+    assert restored.status(receipt["task_id"])["status"] == "cancelled"
+    assert not restored.tasks
+
+
+@pytest.mark.asyncio
+async def test_invalid_modes_and_unobserved_evidence_cannot_complete(tmp_path):
+    entity, manager, _, _ = setup(tmp_path, [
+        transition("goal_complete", summary="Wrong mode", evidence=[]),
+        calls(("run_command", {"command": "fail"})),
+        transition("goal_submit_for_verification", summary="False success", evidence=["e1"]),
+        transition("goal_submit_for_verification", summary="Fake proof", evidence=["e999"]),
+        transition("goal_checkpoint", summary="Need repair", next_steps="Fix failing test"),
+    ])
+    receipt = await manager.submit("Fix parser", request(), max_phases=1)
+    await settle(manager)
+    state = manager.status(receipt["task_id"])
+    assert state["status"] == "paused" and state["mode"] == "work"
+    assert "candidate_evidence" not in state
+    assert len(entity.client.prompts) == 5
+
+
+@pytest.mark.asyncio
+async def test_verifier_cannot_use_direct_editing_tools_before_requesting_changes(tmp_path):
+    _, manager, _, operations = setup(tmp_path, [
+        calls(("run_command", {"command": "tests"})),
+        transition("goal_submit_for_verification", summary="Ready", evidence=["e1"]),
+        calls(("write_file", {"path": "bad.py", "content": "new code during review"})),
+        transition("goal_request_changes", summary="Missing case", next_steps="Fix missing case"),
+    ])
+    receipt = await manager.submit("Fix parser", request(), max_phases=2)
+    await settle(manager)
+    assert operations == ["tests"]
+    assert manager.status(receipt["task_id"])["mode"] == "work"
+
+
+@pytest.mark.asyncio
+async def test_phase_budget_requests_handoff_without_extra_model_rounds(tmp_path):
+    responses = [calls(("run_command", {"command": f"operation {i}"})) for i in range(3)]
+    responses.append(transition("goal_checkpoint", summary="Three operations done", next_steps="Check result", notes="Continue without repeating operations"))
+    entity, manager, _, _ = setup(tmp_path, responses)
+    receipt = await manager.submit("Fix parser", request(), max_phases=1, steps_per_phase=5)
+    await settle(manager)
+    assert len(entity.client.prompts) == 4
+    assert "at most two model rounds left" in json.dumps(entity.client.prompts[-1])
+    assert manager.status(receipt["task_id"])["working_notes"].startswith("Continue without repeating")
 
 
 @pytest.mark.asyncio
@@ -236,7 +617,7 @@ async def test_shutdown_and_restart_recovers_without_inheriting_browser_state(tm
     restored.start()
     await settle(restored)
     state = restored.status(receipt["task_id"])
-    assert state["status"] == "blocked" and state["blocker_count"] == 3
+    assert state["status"] == "blocked" and state["blocker_count"] == 1
     assert "Worker restarted" in entity.client.prompts[0][1]["content"]
 
 
@@ -250,24 +631,26 @@ async def test_rephrased_blockers_stop_without_consuming_more_model_calls(tmp_pa
     receipt = await manager.submit("Update the live display", request())
     await settle(manager)
     state = manager.status(receipt["task_id"])
-    assert state["status"] == "blocked" and state["phase"] == 3
-    assert state["blocker_count"] == 3 and len(entity.client.prompts) == 3
-    assert state["reason"] == "Supply a documented way to publish live quotes."
+    assert state["status"] == "blocked" and state["phase"] == 1
+    assert state["blocker_count"] == 1 and len(entity.client.prompts) == 1
+    assert state["reason"] == "Need the supported live publisher."
 
 
 @pytest.mark.asyncio
-async def test_independent_progress_resets_consecutive_blocked_phases(tmp_path):
+async def test_explicit_resume_after_blocker_preserves_work_and_stops_on_new_blocker(tmp_path):
     entity, manager, _, _ = setup(tmp_path, [
         checkpoint("blocked", next_steps="Need publisher"),
-        checkpoint("blocked", next_steps="Publisher still unavailable"),
         calls(("run_command", {"command": "independent tests pass"})),
         checkpoint("continue", next_steps="Verify the local display"),
         checkpoint("blocked", next_steps="Need publisher"),
     ])
     receipt = await manager.submit("Update the live display", request(), max_phases=4)
     await settle(manager)
+    assert manager.status(receipt["task_id"])["status"] == "blocked"
+    await manager.resume(receipt["task_id"], "Publisher is fixed; continue with saved work")
+    await settle(manager)
     state = manager.status(receipt["task_id"])
-    assert state["status"] == "paused" and state["phase"] == 4
+    assert state["status"] == "blocked" and state["phase"] == 3
     assert state["blocker_count"] == 1
 
 
@@ -453,14 +836,14 @@ async def test_failed_progress_delivery_cannot_abort_goal(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_spatial_goal_say_delivers_each_update_and_completion_to_its_body(tmp_path):
+async def test_legacy_say_is_silent_status_and_completion_is_one_concise_body_notice(tmp_path):
     from ngram.ngram_ar.spatial_sessions import SpatialSession, SpatialSessions
 
     entity, manager, files, _ = setup(tmp_path, [
         calls(("say", {"message": "First screen rendered."})),
         calls(("say", {"message": "First screen rendered."})),
-        calls(("say", {"message": "Checking the second screen."})),
         calls(("run_command", {"command": "screens pass"})),
+        calls(("say", {"message": "Checking the second screen."})),
         checkpoint("complete", summary="Screens verified", evidence="e1"),
         calls(("run_command", {"command": "fresh review"})),
         checkpoint("complete", summary="Screens verified", next_steps="", evidence="e2"),
@@ -478,12 +861,12 @@ async def test_spatial_goal_say_delivers_each_update_and_completion_to_its_body(
     receipt = await manager.submit("Verify screens", request())
     await settle(manager)
     assert manager.status(receipt["task_id"])["status"] == "complete"
-    assert [a["text"] for a in sent[:2]] == ["First screen rendered.", "Checking the second screen."]
-    assert len(sent) == 3 and sent[2]["text"].startswith("Coding goal complete.")
+    assert [a["text"] for a in sent] == ["Screens verified"]
+    assert sent[0]["notification"] == {"goalId": receipt["task_id"], "kind": "terminal"}
     assert all(a["type"] == "action:speak" and a["sessionId"] == "browser" for a in sent)
     assert "accepted" in manager.status(receipt["task_id"])["last_spatial_delivery"]
     assert "Checking the second screen." in json.dumps(entity.client.prompts)
-    assert "completion is not confirmed" in json.dumps(entity.client.prompts)
+    assert "use say() to share findings" not in json.dumps(entity.client.prompts)
     assert "Screens verified" in files.files[receipt["task_record"]]
 
 
@@ -511,7 +894,7 @@ async def test_spatial_progress_rebinds_safely_without_replaying_uncertain_speec
     assert "duplicate" in await manager._notify(record, "Screen rendered.")
     assert len(sent) == 1 and sent[0]["sessionId"] == "refresh"
     entity._ngram_ar_sessions.register(SpatialSession("another-tab", disconnected, dict, "rook"))
-    assert "ambiguous" in await manager._notify(record, "Next screen rendered.")
+    assert "ambiguous" in await manager._notify(record, "Next screen rendered.", kind="terminal")
     assert len(sent) == 1
 
 
@@ -661,6 +1044,12 @@ async def test_http_controls_authenticate_and_use_the_same_durable_goal(tmp_path
         response = await client.get(path, headers=headers)
         assert response.headers["Cache-Control"] == "no-store"
         assert (await response.json())["task_id"] == receipt["task_id"]
+        assert (await client.post(path + "/steer", json={"instructions": "Handle spaces"})).status == 403
+        assert (await client.post(path + "/steer", headers=headers, json={"instructions": []})).status == 400
+        assert (await client.post(path + "/steer", headers=headers, json={"instructions": ""})).status == 400
+        response = await client.post(path + "/steer", headers=headers, json={"instructions": "Handle spaces"})
+        assert response.status == 200
+        assert (await response.json())["guidance_version"] == 1
         assert (await client.post(path + "/cancel")).status == 403
         assert (await client.post(path + "/cancel", headers=headers)).status == 200
         await settle(manager)
@@ -671,4 +1060,4 @@ async def test_http_controls_authenticate_and_use_the_same_durable_goal(tmp_path
         manager.records[receipt["task_id"]]["max_phases"] = 1
         assert (await client.post(path + "/resume", headers=headers, json={"instructions": "Handle tabs"})).status == 200
         await settle(manager)
-        assert manager.status(receipt["task_id"])["amendments"] == ["Handle tabs"]
+        assert manager.status(receipt["task_id"])["amendments"] == ["Handle spaces", "Handle tabs"]

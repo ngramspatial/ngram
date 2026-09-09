@@ -24,13 +24,18 @@ def register_code_task_routes(app, check_token):
                 body = await request.json()
                 if not isinstance(body, dict):
                     raise ValueError("expected an object")
-                result = await manager.resume(
-                    task_id, str(body.get("instructions", "")), int(body.get("additional_seconds", 21600)),
-                )
+                if not isinstance(body.get("instructions", ""), str):
+                    raise ValueError("instructions must be text")
+                if request.match_info["action"] == "steer":
+                    result = await manager.steer(task_id, str(body.get("instructions", "")))
+                else:
+                    result = await manager.resume(
+                        task_id, str(body.get("instructions", "")), int(body.get("additional_seconds", 21600)),
+                    )
             except (ValueError, TypeError):
-                raise web.HTTPBadRequest(text="Invalid resume request") from None
+                raise web.HTTPBadRequest(text="Invalid goal control request") from None
         return web.json_response(result, headers={"Cache-Control": "no-store"}, status=200 if result.get("ok") else 400)
 
     app.router.add_get("/code-tasks", handle)
     app.router.add_get("/code-tasks/{task_id:[a-f0-9]{32}}", handle)
-    app.router.add_post("/code-tasks/{task_id:[a-f0-9]{32}}/{action:resume|cancel}", handle)
+    app.router.add_post("/code-tasks/{task_id:[a-f0-9]{32}}/{action:resume|cancel|steer}", handle)

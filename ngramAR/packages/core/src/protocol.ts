@@ -15,6 +15,8 @@ export interface WorldAction extends ProtocolMessage {
 export interface SpeakAction extends ProtocolMessage {
     type: "action:speak";
     text: string;
+    /** Background goal notices can replace obsolete queued progress for this goal. */
+    notification?: { goalId: string; kind: 'progress' | 'terminal' };
     /** Pre-synthesized audio (base64). If absent, shell uses its voice profile. */
     audioData?: string;
     /** Browser speech choices supplied by the gateway; never includes credentials. */

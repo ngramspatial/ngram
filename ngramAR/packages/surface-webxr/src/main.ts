@@ -971,7 +971,10 @@ async function main() {
       case 'action:inference_status':
         if (msg.paused) { visualInspection?.cancel(); clearResponsePlayback(); responseControl.reset(); }
         break;
-      case 'action:work_status': workStatus.update(msg as any); break;
+      case 'action:work_status':
+        workStatus.update(msg as any);
+        if (msg.scope === 'code_task' && msg.status !== 'running') speech.discardQueuedNotice(msg.runId);
+        break;
       case 'action:work_status_reset': workStatus.clear(); workStatus.setConnected(true); break;
       case 'action:work_connection': workStatus.setConnected(msg.connected); break;
       case 'action:context_status':
@@ -1799,7 +1802,7 @@ async function main() {
     responseControl.update({ playing: true });
     ambient.recordInteraction();
 
-    if (msg.text) {
+    if (msg.text && msg.notification?.kind !== 'progress') {
       ui.addTranscript('agent', msg.text);
     }
 
@@ -1832,6 +1835,7 @@ async function main() {
 
     speech.playResponse({
       text: msg.text, audioData: msg.audioData, audioUrl: msg.audioUrl,
+      notification: msg.notification,
       speed: msg.voiceConfig?.speed, voice: msg.voiceConfig?.voice,
       onStart: () => { avatar.setSpeaking(true); avatar.setAnimation(pickSpeakAnim()); },
       onCaption: showSpeechCaption,

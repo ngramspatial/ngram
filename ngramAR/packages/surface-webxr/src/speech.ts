@@ -7,6 +7,7 @@ export interface SpeechPlaybackOptions {
   audioUrl?: string;
   speed?: number;
   voice?: string;
+  notification?: { goalId: string; kind: 'progress' | 'terminal' };
   onStart?: () => void;
   onCaption?: (text: string) => void;
 }
@@ -21,6 +22,8 @@ type ListeningMode = 'browser' | 'recorded';
 interface QueuedPlay {
   play: (onDone: () => void) => void;
   onEnd: (cancelled?: boolean) => void;
+  notification?: SpeechPlaybackOptions['notification'];
+  expiresAt?: number;
 }
 
 export class SpeechHandler {
@@ -409,6 +412,10 @@ export class SpeechHandler {
   }
 
   playResponse(options: SpeechPlaybackOptions, onEnd: (cancelled?: boolean) => void): void {
+    // Ordinary conversation takes precedence over pending progress notices.
+    // A new goal notice replaces older unspoken notices for that goal only.
+    if (options.notification) this.discardQueuedNotice(options.notification.goalId, true);
+    else this.discardQueuedNotice();
     this.enqueue((done) => {
       const epoch = this.playbackEpoch;
       const fallback = () => {
@@ -430,7 +437,7 @@ export class SpeechHandler {
             play(btoa(binary));
           }).catch(fallback);
       } else fallback();
-    }, onEnd);
+    }, onEnd, options.notification);
   }
 
   private clearCaptionTimer(): void {
@@ -452,12 +459,24 @@ export class SpeechHandler {
     return update;
   }
 
-  private enqueue(play: (onDone: () => void) => void, onEnd: () => void): void {
-    this.playQueue.push({ play, onEnd });
+  discardQueuedNotice(goalId?: string, includeTerminal = false): void {
+    const removed = this.playQueue.filter(item => item.notification
+      && (!goalId || item.notification.goalId === goalId)
+      && (includeTerminal || item.notification.kind === 'progress'));
+    this.playQueue = this.playQueue.filter(item => !removed.includes(item));
+    for (const item of removed) item.onEnd(true);
+  }
+
+  private enqueue(play: (onDone: () => void) => void, onEnd: () => void, notification?: SpeechPlaybackOptions['notification']): void {
+    this.playQueue.push({ play, onEnd, notification,
+      expiresAt: notification?.kind === 'progress' ? Date.now() + 90000 : undefined });
     if (!this.isPlaying) this.drainQueue();
   }
 
   private drainQueue(): void {
+    while (this.playQueue[0]?.expiresAt && this.playQueue[0].expiresAt! <= Date.now()) {
+      this.playQueue.shift()!.onEnd(true);
+    }
     if (this.playQueue.length === 0) {
       this.isPlaying = false;
       this.setMicMuted(false);
