@@ -241,6 +241,37 @@ async def test_shutdown_and_restart_recovers_without_inheriting_browser_state(tm
 
 
 @pytest.mark.asyncio
+async def test_rephrased_blockers_stop_without_consuming_more_model_calls(tmp_path):
+    entity, manager, _, _ = setup(tmp_path, [
+        checkpoint("blocked", next_steps="Need the supported live publisher."),
+        checkpoint("blocked", next_steps="Host-to-Spatial publication is unavailable."),
+        checkpoint("blocked", next_steps="Supply a documented way to publish live quotes."),
+    ])
+    receipt = await manager.submit("Update the live display", request())
+    await settle(manager)
+    state = manager.status(receipt["task_id"])
+    assert state["status"] == "blocked" and state["phase"] == 3
+    assert state["blocker_count"] == 3 and len(entity.client.prompts) == 3
+    assert state["reason"] == "Supply a documented way to publish live quotes."
+
+
+@pytest.mark.asyncio
+async def test_independent_progress_resets_consecutive_blocked_phases(tmp_path):
+    entity, manager, _, _ = setup(tmp_path, [
+        checkpoint("blocked", next_steps="Need publisher"),
+        checkpoint("blocked", next_steps="Publisher still unavailable"),
+        calls(("run_command", {"command": "independent tests pass"})),
+        checkpoint("continue", next_steps="Verify the local display"),
+        checkpoint("blocked", next_steps="Need publisher"),
+    ])
+    receipt = await manager.submit("Update the live display", request(), max_phases=4)
+    await settle(manager)
+    state = manager.status(receipt["task_id"])
+    assert state["status"] == "paused" and state["phase"] == 4
+    assert state["blocker_count"] == 1
+
+
+@pytest.mark.asyncio
 async def test_inference_pause_does_not_spin_or_report_completion(tmp_path):
     entity, manager, _, _ = setup(tmp_path, [])
     entity.inference_paused = True

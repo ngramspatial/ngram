@@ -453,7 +453,9 @@ class CodeTaskManager:
             record["blocker_count"] = record["stalled_phases"] = 0
         elif decision["status"] == "blocked":
             blocker = decision["next_steps"].strip().lower()
-            record["blocker_count"] = record["blocker_count"] + 1 if record["blocker"] == blocker else 1
+            # The model paraphrases blockers between phases. Count consecutive
+            # blocked decisions, not exact prose; continue/complete reset this.
+            record["blocker_count"] += 1
             record["blocker"] = blocker
             record["mode"] = "work"
             if record["blocker_count"] >= 3:
@@ -577,7 +579,8 @@ class CodeTaskManager:
             "Each phase is a context boundary, not the end of the goal. Implement, test, inspect failures, "
             "and refine until all success criteria are met. Save a concrete checkpoint before end_turn. "
             "Use continue for unfinished work; use blocked only for a specific external dependency you "
-            "cannot resolve. A repeated blocker is reviewed across three phases. Budget exhaustion "
+            "cannot resolve after finishing independent work. Three consecutive blocked phases stop the goal; "
+            "rewording the blocker does not reset this count. Budget exhaustion "
             "never means complete. A plan or an unverified claim is not completion.\n"
             "For complete, cite successful tool evidence IDs with the relevant commands/results. "
             "A separate fresh verification phase must inspect the result before completion is accepted. "
