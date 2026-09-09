@@ -434,7 +434,7 @@ export const WORLD_API_HELP = {
   entity: {
     id: "unique-id",
     kind: "shape|group|light|control|asset",
-    parent: "group-id or null",
+    parent: "group-id, asset-id or null (children follow the parent, including imported model refreshes)",
     tags: ["assembly-name"],
     transform: { position: [0, 1, -1], rotation: [0, 0, 0], scale: [1, 1, 1] },
     geometry: {

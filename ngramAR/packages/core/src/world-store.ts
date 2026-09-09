@@ -210,8 +210,8 @@ export class WorldStore {
         if (visited.has(p)) throw new Error("Parent cycle");
         visited.add(p);
         const parent = entities.get(p);
-        if (!parent || parent.kind !== "group")
-          throw new Error(`Parent ${p} must be a group`);
+        if (!parent || !["group", "asset"].includes(parent.kind))
+          throw new Error(`Parent ${p} must be a group or asset`);
         p = parent.parent;
       }
     }

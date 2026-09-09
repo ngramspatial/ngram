@@ -123,6 +123,10 @@ test("real GLB refresh preserves Figment anchors and physics; tuning physics ret
     apply(world, [create("model", { kind: "asset", asset: { url: "/revision-1.glb", normalize: false }, transform: { position: [1,2,3] }, physics: { mode: "kinematic", colliders: [{ id: "body", size: [1,1,.1] }] }, figment: { anchors: { handle: { node: "Handle" } }, grips: { hold: { anchor: "handle" } } } })]);
     await loaded;
     const visual = world.entries.get("model").visual;
+    apply(world, [create("display", { parent: "model", transform: { position: [0,.25,.1] } })]);
+    const display = world.entries.get("display").node;
+    assert.equal(display.parent, world.entries.get("model").node);
+    assert.deepEqual(display.getWorldPosition(new m.Vector3()).toArray(), [1,2.25,3.1]);
     const definition = structuredClone(world.entries.get("model").spec.figment);
     const pose = world.sample("model").transform;
     apply(world, [patch("model", { physics: { mass: 2, friction: .9 } })]);
@@ -138,7 +142,27 @@ test("real GLB refresh preserves Figment anchors and physics; tuning physics ret
     assert.deepEqual(world.sample("model").transform, pose);
     near(world.sample("model").anchors.handle.position[1], 1.8);
     assert.equal(world.entries.get("model").spec.physics.mass, 2);
+    assert.equal(world.entries.get("display").node, display);
+    assert.equal(display.parent, world.entries.get("model").node);
+    assert.deepEqual(display.getWorldPosition(new m.Vector3()).toArray(), [1,2.25,3.1]);
+    assert.ok(world.hold("model", "desktop"));
+    assert.throws(() => apply(world, [patch("display", { transform: { position: [9,9,9] } })], "program:figment.model"), /Human interaction/);
+    apply(world, [patch("display", { material: { color: "#42f5f5" } })], "program:figment.model");
+    apply(world, [{ op: "entity.delete", id: "model" }], "desktop");
+    assert.equal(world.entries.has("display"), false);
   } finally { world.unsubscribePhysics(); globalThis.fetch = previousFetch; }
+});
+
+test("asset hierarchies reject cycles, missing parents and unsupported parent kinds atomically", () => {
+  const store = new WorldStore({ commit() {} });
+  const model = id => create(id, { kind: "asset", asset: { url: "/model.glb" } });
+  store.apply({ requestId: "initial", operations: [model("model"), create("child", { kind: "group", parent: "model" })] });
+  assert.throws(() => store.apply({ requestId: "cycle", operations: [patch("model", { parent: "child" })] }), /Parent cycle/);
+  assert.throws(() => store.apply({ requestId: "missing", operations: [patch("child", { parent: "missing" })] }), /must be a group or asset/);
+  assert.throws(() => store.apply({ requestId: "shape", operations: [create("shape"), patch("child", { parent: "shape" })] }), /must be a group or asset/);
+  assert.equal(store.document.entities.length, 2);
+  assert.equal(store.document.entities.find(e => e.id === "model").parent, null);
+  assert.equal(store.document.entities.find(e => e.id === "child").parent, "model");
 });
 
 test("anchors resolve unique authored mesh nodes and grip poses align without resizing", () => {
