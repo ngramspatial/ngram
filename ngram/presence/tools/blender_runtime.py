@@ -139,6 +139,19 @@ class BlenderRuntime:
             return {"ok": True, "projects": [self.project(p.parent.name).status()
                     for p in self.root.glob("*/project.json")]}
         p = self.project(project_id(payload.get("project_id")))
+        if command == "feed":
+            directory = self.directory(p.ident)
+            path = (directory / "feeds" / f"{project_id(payload.get('name'))}.json").resolve()
+            if not path.is_relative_to(directory / "feeds") or not path.is_file():
+                raise ValueError("Published project feed unavailable")
+            with path.open("rb") as source:
+                raw = source.read(65537)
+            if len(raw) > 65536:
+                raise ValueError("Project feed exceeds 64 KiB")
+            value = json.loads(raw, parse_constant=lambda value: (_ for _ in ()).throw(ValueError("Non-finite feed value")))
+            if not isinstance(value, dict):
+                raise ValueError("Project feed must be a JSON object")
+            return {"ok": True, "data": value}
         if command == "status":
             return p.status()
         if command == "stop":

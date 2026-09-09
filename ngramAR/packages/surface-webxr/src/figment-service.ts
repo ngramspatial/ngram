@@ -22,9 +22,9 @@ export class FigmentService {
     const entries = id ? [[id, this.entry(id)]] : [...this.world.entries].filter(([, e]) => e.spec.figment);
     return entries.map(([id, e]) => {
       const definition = structuredClone(e.spec.figment);
-      if (definition?.behavior && !includeSource) definition.behavior = { hz: definition.behavior.hz, sourceChars: definition.behavior.source.length };
+      if (definition?.behavior && !includeSource) definition.behavior = { hz: definition.behavior.hz, dataSource: definition.behavior.dataSource, sourceChars: definition.behavior.source.length };
       const record = this.service.programs.inspect(this.programId(id))[0];
-      return { id, definition, physics: e.spec.physics, ...this.world.sample(id), behavior: record ? { id: record.id, status: record.status, frames: record.frames, error: record.error, hz: record.hz } : null };
+      return { id, definition, physics: e.spec.physics, ...this.world.sample(id), behavior: record ? { id: record.id, status: record.status, frames: record.frames, error: record.error, hz: record.hz, dataStatus: record.dataStatus } : null };
     });
   }
   async sync(id) {
@@ -36,6 +36,7 @@ export class FigmentService {
     }
     return this.service.programs.install({ id: programId, name: f.title, source: f.behavior.source,
       entityIds: [...figmentScope(this.world.store.document, id)], hz: f.behavior.hz,
+      dataSource: f.behavior.dataSource,
       params: { __figment: { root: id, parts: f.parts, joints: f.joints } }, state: {},
     }, { start: false });
   }
@@ -49,7 +50,7 @@ export class FigmentService {
       if (!f?.behavior) continue;
       const record = this.service.programs.records.get(this.programId(id));
       const bindings = { root: id, parts: f.parts, joints: f.joints };
-      if (!record || record.source !== f.behavior.source || record.hz !== f.behavior.hz ||
+      if (!record || record.source !== f.behavior.source || record.hz !== f.behavior.hz || JSON.stringify(record.feed.source) !== JSON.stringify(f.behavior.dataSource ?? null) ||
         JSON.stringify(record.params.__figment) !== JSON.stringify(bindings) ||
         JSON.stringify(record.entityIds) !== JSON.stringify([...figmentScope(this.world.store.document, id)])) await this.sync(id);
     }
@@ -160,7 +161,7 @@ export class FigmentService {
       case "behavior": {
         const id = identifier(payload.id), f = this.entry(id).spec.figment;
         if (!f) throw Error("Object is not a Figment");
-        if (payload.source !== undefined) return this.attach({ id, definition: { behavior: { source: payload.source, hz: payload.hz ?? 20 } }, start: payload.start === true });
+        if (payload.source !== undefined) return this.attach({ id, definition: { behavior: { source: payload.source, hz: payload.hz ?? 20, dataSource: payload.dataSource ?? f.behavior?.dataSource } }, start: payload.start === true });
         if (!["pause", "resume", "reset"].includes(payload.action)) throw Error("Use pause, resume or reset, or supply source");
         if (payload.action === "reset") { await this.sync(id); return this.inspect(id)[0]; }
         const result = await this.service.programs.command(payload.action, this.programId(id));

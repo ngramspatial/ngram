@@ -154,3 +154,45 @@ async def test_bridge_artifacts_and_stop_are_authenticated_and_do_not_infer(tmp_
         assert (await client.get('/blender/model/1/project.json', headers={'Authorization': 'Bearer test-only'})).status == 404
         response = await client.post('/blender/model/stop', headers={'Authorization': 'Bearer test-only'})
         assert (await response.json())['state'] == 'stopped'
+
+
+@pytest.mark.asyncio
+async def test_published_project_feeds_are_live_bounded_and_authenticated(tmp_path, monkeypatch):
+    from aiohttp import web
+    from aiohttp.test_utils import TestClient, TestServer
+
+    runtime = BlenderRuntime(tmp_path)
+    runtime.command({'command': 'create', 'project_id': 'tablet'})
+    directory = runtime.directory('tablet') / 'feeds'
+    directory.mkdir()
+    feed = directory / 'quotes.json'
+    feed.write_text('{"revision":1,"price":123.45}')
+
+    async def call(action, payload):
+        assert action == 'blender' and payload['command'] == 'feed'
+        try:
+            return runtime.command(payload)
+        except ValueError:
+            return {'ok': False}
+
+    monkeypatch.setattr('ngram.ngram_ar.blender_routes.get_execution_client_for_entity', lambda e: SimpleNamespace(call=call))
+    app = web.Application()
+    app['entity'] = object()
+    register_blender_routes(app, lambda r: r.headers.get('Authorization') == 'Bearer test-only')
+    async with TestClient(TestServer(app)) as client:
+        url = '/blender/tablet/feeds/quotes.json'
+        assert (await client.get(url)).status == 403
+        headers = {'Authorization': 'Bearer test-only'}
+        first = await client.get(url, headers=headers)
+        assert (await first.json())['revision'] == 1
+        assert first.headers['Cache-Control'] == 'no-store'
+        feed.write_text('{"revision":2,"price":124.00}')
+        assert (await (await client.get(url, headers=headers)).json())['revision'] == 2
+        feed.write_text('{"payload":"' + 'x' * 65536 + '"}')
+        assert (await client.get(url, headers=headers)).status == 404
+        feed.write_text('{"price":NaN}')
+        assert (await client.get(url, headers=headers)).status == 404
+        feed.write_text('[]')
+        assert (await client.get(url, headers=headers)).status == 404
+    with pytest.raises(ValueError):
+        runtime.command({'command': 'feed', 'project_id': 'tablet', 'name': '../project'})

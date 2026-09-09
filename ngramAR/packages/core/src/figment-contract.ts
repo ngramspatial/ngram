@@ -2,6 +2,15 @@
 import { identifier, number, vector, type V3 } from "./world-contract.js";
 
 export const FIGMENT_PROTOCOL = "ngram.figment/1" as const;
+export interface ProgramDataSource { url: string; intervalSeconds: number }
+export function parseProgramDataSource(value: unknown): ProgramDataSource | null {
+  if (value == null) return null;
+  const source = object(value, "dataSource");
+  fields(source, ["url", "intervalSeconds"], "dataSource");
+  if (typeof source.url !== "string" || !/^\/api\/shells\/[a-z0-9-]+\/blender\/[a-zA-Z0-9_-]{1,64}\/feeds\/[a-zA-Z0-9_-]{1,64}\.json$/.test(source.url))
+    throw Error("Data source must be a published project feed on this surface");
+  return { url: source.url, intervalSeconds: number(source.intervalSeconds, 5, 5, 3600) };
+}
 export interface FigmentProperty {
   type: "number" | "boolean" | "string" | "color";
   label: string;
@@ -35,7 +44,7 @@ export interface FigmentDefinition {
   grips: Record<string, FigmentGrip>;
   properties: Record<string, FigmentProperty>;
   actions: Record<string, { label: string }>;
-  behavior: { source: string; hz: number } | null;
+  behavior: { source: string; hz: number; dataSource?: ProgramDataSource } | null;
   source: { url: string; filename: string } | null;
 }
 
@@ -139,8 +148,10 @@ export function parseFigment(raw: unknown): FigmentDefinition {
   let behavior: FigmentDefinition["behavior"] = null;
   if (f.behavior != null) {
     const b = object(f.behavior, "behavior");
-    fields(b, ["source", "hz"], "behavior");
+    fields(b, ["source", "hz", "dataSource"], "behavior");
     behavior = { source: label(b.source, "", 60000), hz: number(b.hz, 20, 1, 30) };
+    const dataSource = parseProgramDataSource(b.dataSource);
+    if (dataSource) behavior.dataSource = dataSource;
   }
   let source: FigmentDefinition["source"] = null;
   if (f.source != null) {
@@ -157,6 +168,7 @@ export const FIGMENT_API_HELP = {
   protocol: FIGMENT_PROTOCOL,
   definition: "Attach a Figment to an existing entity. parts maps stable names to entity IDs; self always means the root. anchors use part-local metres/radians and optional unique GLB node names. grips reference anchors. properties have type, value, label, editable and optional numeric bounds. actions map names to {label}. behavior contains JavaScript source and hz. source optionally references the editable .blend.",
   behavior: "Return {tick(){},event(e){}}. api.self, api.part(name), api.anchor(name), api.property(name), api.setProperty(name,value), api.patch(part,patch), api.impulse(part,xyz,torque?), api.signal(name,data), api.state, api.time, api.dt. Runs in the existing network-free worker sandbox. Physics/property changes are validated; human grabs own transforms. Event types include action, property, grab, release, collision, collision.end, sensor.enter, sensor.exit, signal.",
+  liveData: "Optional behavior.dataSource:{url:'/api/shells/SHELL/blender/PROJECT/feeds/NAME.json',intervalSeconds:5}. The trusted host atomically writes a JSON object under .ngram/blender/PROJECT/feeds/NAME.json (64 KiB max). The surface polls that authenticated read-only feed while the behavior is running, with no model calls. api.data is the last good JSON or null; api.dataStatus has status waiting/ready/error, receivedAt/checkedAt wall-clock milliseconds and error. Use the producer's timestamp to label quote age; a recent fetch alone does not prove fresh upstream data. Failures retain last good data; Stop pauses reads. The sandbox still has no network. Do not put secrets in published feeds.",
   publishing: "Publish freezes a self-contained version in the local Figment library. Export a .figment.json package to share; import verifies its SHA-256 assets before placing a paused editable instance with new IDs. No cloud account or public upload is implied. Included .blend source remains downloadable and editable.",
   physics: "Use physics mode, mass, gravity, friction, restitution, linearDamping, angularDamping, translations/rotations [boolean,boolean,boolean] and compound colliders. Collider shapes: box, sphere, capsule, cylinder, cone, convex. size is full XYZ extent; position/rotation are object-local. Sensors generate enter/exit. Assets need explicit colliders. Hinge/slider/ball/spring/rope joints connect root bodies.",
   example: {

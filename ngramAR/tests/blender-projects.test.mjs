@@ -66,6 +66,7 @@ test('Gateway streams configured Blender artifacts without forwarding secrets or
   const upstream = createServer((req, res) => {
     requests.push({ path: req.url, auth: req.headers.authorization });
     if (req.url.endsWith('/status')) { res.writeHead(302, { Location: 'http://untrusted.invalid/' }); res.end(); }
+    else if (req.url.endsWith('/feeds/quotes.json')) { res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end('{"revision":1}'); }
     else { res.writeHead(200, { 'Content-Type': 'model/gltf-binary', 'Content-Length': '8' }); res.end('glTFtest'); }
   });
   await new Promise(r => upstream.listen(0, '127.0.0.1', r));
@@ -82,6 +83,11 @@ test('Gateway streams configured Blender artifacts without forwarding secrets or
     assert.equal((await fetch(base + '/model/stop')).status, 404, 'Stop cannot be triggered with GET');
     assert.equal((await fetch(base + '/model/stop', { method: 'POST', headers: { Origin: 'https://untrusted.invalid' } })).status, 403);
     assert.equal(requests.length, 2);
+    const feed = await fetch(base + '/model/feeds/quotes.json');
+    assert.deepEqual(await feed.json(), { revision: 1 });
+    assert.equal(feed.headers.get('cache-control'), 'no-store');
+    assert.equal((await fetch(base + '/model/feeds/quotes.json', { method: 'POST' })).status, 404);
+    assert.equal(requests.length, 3);
   } finally {
     for (const server of [gateway, upstream]) { server.closeAllConnections(); await new Promise(r => server.close(r)); }
   }

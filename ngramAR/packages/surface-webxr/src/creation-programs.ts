@@ -1,5 +1,6 @@
 // @ts-nocheck
-import { WORLD_LIMITS, identifier, number, propertyValue } from "@ngram-ar/core";
+import { WORLD_LIMITS, FIGMENT_API_HELP, identifier, number, propertyValue } from "@ngram-ar/core";
+import { ProgramDataFeed } from './program-data.js';
 
 // Runs inside a dedicated Worker inside an opaque-origin iframe. The iframe's
 // CSP is inherited by its blob Worker: no network, imports, nested workers or DOM.
@@ -10,6 +11,8 @@ export function workerBootstrap() {
     entities = [],
     time = 0,
     dt = 0,
+    dataValue = null,
+    dataStatus = { status: 'waiting', receivedAt: 0, checkedAt: 0, error: '' },
     operations = [];
   const partId = name => name === "self" || name === undefined ? params.__figment?.root : params.__figment?.parts?.[name];
   const emit = op => {
@@ -24,6 +27,8 @@ export function workerBootstrap() {
       configurable: false,
     });
   const api = Object.freeze({
+    get data() { return dataValue; },
+    get dataStatus() { return dataStatus; },
     get state() {
       return state;
     },
@@ -70,6 +75,8 @@ export function workerBootstrap() {
         return;
       }
       if (data.type !== "step") return;
+      dataValue = data.feed ?? null;
+      dataStatus = data.feedStatus ?? dataStatus;
       entities = data.entities;
       params = data.params;
       time = data.time;
@@ -109,6 +116,7 @@ addEventListener('message',event=>{
 <\/script>`;
 
 export const PROGRAM_API_HELP = {
+  liveData: FIGMENT_API_HELP.liveData,
   install:
     "{id,name?,source,entityIds:[...],params:{...},state:{...},hz?:1..30}. Source is JavaScript returning {tick(){...},event(event){...}}. No imports, DOM or network. Runs locally without model requests.",
   api: "api.time (simulation seconds), api.dt (seconds), api.params, api.state (mutable JSON persisted at checkpoints), api.get(id) (live entity snapshot including heldBy), api.emit([world operations]). Skip held entities when animating.",
@@ -146,6 +154,8 @@ export class CreationPrograms {
         params: r.params,
         state: r.state,
         hz: r.hz,
+        dataSource: r.feed.source,
+        dataStatus: { ...r.feed.status },
         frames: r.frames,
         time: r.time,
         ...(includeSource ? { source: r.source } : {}),
@@ -160,6 +170,7 @@ export class CreationPrograms {
       params: r.params,
       state: r.state,
       hz: r.hz,
+      dataSource: r.feed.source,
       time: r.time,
       status: r.status === "failed" ? "failed" : "paused",
       error: r.error,
@@ -203,6 +214,7 @@ export class CreationPrograms {
       params: structuredClone(value.params ?? {}),
       state: structuredClone(value.state ?? {}),
       hz: number(value.hz, 20, 1, 30),
+      feed: new ProgramDataFeed(value.dataSource),
       frames: 0,
       time: number(value.time, 0, 0, 1e12),
       cursor: this.world.store.events().cursor,
@@ -270,6 +282,7 @@ export class CreationPrograms {
           reject(Error(error));
         } else {
           r.status = "running";
+          r.feed.start();
           r.last = performance.now();
           r.nextDue = r.last + 1000 / r.hz;
           resolve();
@@ -421,11 +434,14 @@ export class CreationPrograms {
         continue;
       }
       if (this.world.paused) {
+        r.feed.stop();
         r.last = now;
         r.nextDue = now + 1000 / r.hz;
         continue;
       }
       r.last = now;
+      r.feed.start();
+      void r.feed.refresh();
       r.nextDue = Math.max(r.nextDue + 1000 / r.hz, now);
       r.started = now;
       r.busy = true;
@@ -441,6 +457,8 @@ export class CreationPrograms {
           dt,
           time: r.time,
           params: r.params,
+          feed: r.feed.data,
+          feedStatus: r.feed.status,
           entities: this.world.store.observe({ ids: r.entityIds, limit: 256 })
             .entities,
           events: filtered,
@@ -451,6 +469,7 @@ export class CreationPrograms {
   }
   private destroy(r) {
     if (!r) return;
+    r.feed.stop();
     r.frame?.contentWindow?.postMessage({ type: "terminate" }, "*");
     r.frame?.remove();
     r.frame = null;

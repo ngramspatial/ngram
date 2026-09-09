@@ -8,6 +8,16 @@ from ngram.presence.tools.execution_rpc import get_execution_client_for_entity
 
 
 def register_blender_routes(app, check_token):
+    async def feed(request):
+        if not check_token(request):
+            raise web.HTTPForbidden()
+        client = get_execution_client_for_entity(request.app["entity"])
+        result = await client.call("blender", {"command": "feed", "project_id": request.match_info["project"],
+                                              "name": request.match_info["feed"]})
+        if not result.get("ok"):
+            raise web.HTTPNotFound()
+        return web.json_response(result["data"], headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
+
     async def handle(request):
         if not check_token(request):
             raise web.HTTPForbidden()
@@ -64,5 +74,6 @@ def register_blender_routes(app, check_token):
         return response
 
     app.router.add_route("*", "/blender/{project:[a-zA-Z0-9_-]{1,64}}/{command:status|stop}", handle)
+    app.router.add_get("/blender/{project:[a-zA-Z0-9_-]{1,64}}/feeds/{feed:[a-zA-Z0-9_-]{1,64}}.json", feed)
     app.router.add_get("/blender/{project:[a-zA-Z0-9_-]{1,64}}/renders/{render:[a-f0-9]{32}}/{name:view.jpg}", artifact)
     app.router.add_get("/blender/{project:[a-zA-Z0-9_-]{1,64}}/{revision:[0-9]+}/{name:preview.glb|project.blend}", artifact)
