@@ -421,6 +421,69 @@ async def test_failed_progress_delivery_cannot_abort_goal(tmp_path):
     assert manager.status(receipt["task_id"])["status"] == "paused"
 
 
+@pytest.mark.asyncio
+async def test_spatial_goal_say_delivers_each_update_and_completion_to_its_body(tmp_path):
+    from ngram.ngram_ar.spatial_sessions import SpatialSession, SpatialSessions
+
+    entity, manager, files, _ = setup(tmp_path, [
+        calls(("say", {"message": "First screen rendered."})),
+        calls(("say", {"message": "First screen rendered."})),
+        calls(("say", {"message": "Checking the second screen."})),
+        calls(("run_command", {"command": "screens pass"})),
+        checkpoint("complete", summary="Screens verified", evidence="e1"),
+        calls(("run_command", {"command": "fresh review"})),
+        checkpoint("complete", summary="Screens verified", next_steps="", evidence="e2"),
+    ])
+    sent = []
+
+    async def send(actions):
+        action = actions[0]
+        sent.append(action)
+        session.acknowledge({"completedActionId": action["actionId"], "status": "accepted"})
+
+    session = SpatialSession("browser", send, dict, "rook")
+    entity._ngram_ar_sessions = SpatialSessions()
+    entity._ngram_ar_sessions.register(session)
+    receipt = await manager.submit("Verify screens", request())
+    await settle(manager)
+    assert manager.status(receipt["task_id"])["status"] == "complete"
+    assert [a["text"] for a in sent[:2]] == ["First screen rendered.", "Checking the second screen."]
+    assert len(sent) == 3 and sent[2]["text"].startswith("Coding goal complete.")
+    assert all(a["type"] == "action:speak" and a["sessionId"] == "browser" for a in sent)
+    assert "accepted" in manager.status(receipt["task_id"])["last_spatial_delivery"]
+    assert "Checking the second screen." in json.dumps(entity.client.prompts)
+    assert "completion is not confirmed" in json.dumps(entity.client.prompts)
+    assert "Screens verified" in files.files[receipt["task_record"]]
+
+
+@pytest.mark.asyncio
+async def test_spatial_progress_rebinds_safely_without_replaying_uncertain_speech(tmp_path):
+    from ngram.ngram_ar.spatial_sessions import SpatialSession, SpatialSessions
+
+    entity, manager, _, _ = setup(tmp_path, [checkpoint()])
+    receipt = await manager.submit("Verify screens", request(), max_phases=1)
+    await settle(manager)
+    record = manager.records[receipt["task_id"]]
+    record["spatial_route"] = {"session_id": "browser", "shell_slug": "rook"}
+    entity._ngram_ar_sessions = SpatialSessions()
+    sent = []
+
+    async def disconnected(actions):
+        sent.extend(actions)
+        raise ConnectionError("lost socket after write")
+
+    entity._ngram_ar_sessions.register(SpatialSession("unrelated", disconnected, dict, "other"))
+    assert "not sent" in await manager._notify(record, "Screen rendered.")
+    assert sent == []
+    entity._ngram_ar_sessions.register(SpatialSession("refresh", disconnected, dict, "rook"))
+    assert "execution unknown" in await manager._notify(record, "Screen rendered.")
+    assert "duplicate" in await manager._notify(record, "Screen rendered.")
+    assert len(sent) == 1 and sent[0]["sessionId"] == "refresh"
+    entity._ngram_ar_sessions.register(SpatialSession("another-tab", disconnected, dict, "rook"))
+    assert "ambiguous" in await manager._notify(record, "Next screen rendered.")
+    assert len(sent) == 1
+
+
 def test_goal_numeric_parameters_have_numeric_tool_schemas():
     registry = ToolRegistry()
     registry.register_decorated(code_task_session)
@@ -460,7 +523,7 @@ async def test_spatial_goal_keeps_authoring_tools_and_images_across_real_tool_ro
     await settle(manager)
     state = manager.status(receipt["task_id"])
     assert state["status"] == "complete" and state["phase"] == 2
-    assert [a["type"] for a in dispatched] == ["action:world", "action:request_capture", "action:request_capture"]
+    assert [a["type"] for a in dispatched] == ["action:world", "action:request_capture", "action:request_capture", "action:speak"]
     visual = [m["content"] for m in entity.client.prompts[2] if isinstance(m.get("content"), VisualResult)]
     assert len(visual) == 1 and visual[0].images[0]["url"] == image
     assert "Evidence ID: e2" in visual[0]

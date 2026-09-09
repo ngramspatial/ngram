@@ -19,7 +19,7 @@ import structlog
 from ngram.cognition.deliberate import DeliberateCognition
 from ngram.inference.control import InferencePausedError
 from ngram.inference.visual_results import VisualResult
-from ngram.ngram_ar.spatial_sessions import SpatialSessions
+from ngram.ngram_ar.spatial_sessions import SpatialSessions, connected_spatial_session
 from ngram.models import Input
 from ngram.presence.tools.code_task import _normalize_task_path, _slug_objective
 from ngram.presence.tools.execution_rpc import get_execution_client_for_entity
@@ -310,20 +310,39 @@ class CodeTaskManager:
         if not result.get("ok"):
             raise RuntimeError(result.get("error") or "task record write failed")
 
-    async def _notify(self, record: dict[str, Any], message: str) -> None:
+    async def _notify(self, record: dict[str, Any], message: str) -> str:
         # Resolve a durable chat route each time. Never retain an AR socket or
         # use a broadcast fallback when the original surface is disconnected.
         origin = record["origin"]
+        if origin["platform"] == "ngram_ar":
+            inp = Input(text="", platform="code_task", channel=record["task_id"],
+                        person_id=origin["person_id"], person_name=origin["person_name"],
+                        metadata={"code_task_spatial": record.get("spatial_route", {})})
+            session = connected_spatial_session(self.entity, inp)
+            if session is None:
+                return "[speech not sent: originating Spatial body is disconnected or ambiguous]"
+            if record.get("last_spatial_notification") == message:
+                return "[duplicate speech suppressed]"
+            # Persist before dispatch: a disconnect or restart must not replay
+            # speech whose delivery is uncertain. Resolve a fresh body per call.
+            record["last_spatial_notification"] = message
+            record["last_spatial_delivery"] = "[dispatching; speech delivery not confirmed]"
+            self._save(record)
+            record["last_spatial_delivery"] = await session.dispatch({"type": "action:speak", "text": message[:4000]})
+            self._save(record)
+            return record["last_spatial_delivery"]
         if origin["platform"] not in {"telegram", "discord"}:
-            return
+            return "[no connected chat route]"
         platform = getattr(self.entity, "_platforms", {}).get(origin["platform"])
         if platform is None:
-            return
+            return "[no connected chat route]"
         try:
             async with asyncio.timeout(5):
                 await platform.send_message(origin["channel"], message[:4000])
+            return "[sent]"
         except Exception:
             log.warning("code_task_notification_failed", task_id=record["task_id"])
+            return "[chat delivery failed; progress remains saved]"
 
     def _check_running(self, record: dict[str, Any]) -> None:
         if self.closing or record["status"] == "cancelling":
@@ -409,11 +428,14 @@ class CodeTaskManager:
                     await self._mirror(record)
                 except Exception:
                     log.exception("code_task_mirror_failed", task_id=record["task_id"])
-                await self._notify(record, (
+                notification = (
                     f"Coding goal {record['status']}: {record['objective']}\n"
                     f"{record.get('reason', '')}\n{record['summary']}\n"
                     f"Task: {record['task_id']}"
-                ))
+                )
+                if record["origin"]["platform"] == "ngram_ar":
+                    notification = f"Coding goal {record['status']}. {record['summary']} {record.get('reason', '')}"[:1800]
+                await self._notify(record, notification)
 
     def _apply_decision(self, record: dict[str, Any], decision: dict[str, Any]) -> None:
         record["reason"] = ""
@@ -477,17 +499,23 @@ class CodeTaskManager:
             return "[checkpoint saved; call end_turn]"
 
         async def progress(message: str) -> str:
+            message = message.strip()[:4000]
+            if not message:
+                return "[empty progress message, not sent]"
             record["summary"] = message[:4000]
             self._save(record)
             await work_progress()
             await self._mirror(record)
+            if record["origin"]["platform"] == "ngram_ar":
+                delivery = await self._notify(record, message)
+                return f"[progress saved to task status]\n{delivery}"
             if time.time() - record.get("last_notification_at", 0) >= 60:
                 await self._notify(record, message)
                 record["last_notification_at"] = time.time()
             return "[progress saved to task status]"
 
         sub.register_fn("code_task_checkpoint", "Save the phase handoff. complete proposes completion; blocked names an external dependency. Cite evidence IDs returned by tools.", checkpoint)
-        sub.register_fn("say", "Save a short progress update to this goal's status and task record.", progress)
+        sub.register_fn("say", "Send a short progress message to the originating user while work continues. In Spatial this uses visible speech and TTS. Also saves the update to goal status and the task record. Report meaningful progress, not every tool call.", progress)
         inp = Input(
             text=record["objective"], person_id=record["origin"]["person_id"],
             person_name=record["origin"]["person_name"], channel=record["task_id"], platform="code_task",
@@ -563,7 +591,8 @@ class CodeTaskManager:
             "ar_world/ar_figment capabilities and ar_blender capabilities directly, not workspace guesses. "
             "Use the supported Blender workflow so edits publish to the existing object with human transforms preserved. "
             "Use render_view or ar_blender render to see the model, then ar_request_capture for actual room verification. "
-            "Background work may finish while the launching chat is idle; say saves visible goal progress. "
+            "Background work may finish while the launching chat is idle; say sends progress to the originating user "
+            "(speech in connected Spatial) and saves it to goal status. A delivery receipt does not prove audible playback. "
             "If the originating room is disconnected, do independent host work first and checkpoint the remaining "
             "room verification as a blocker. Never guess another room or repeatedly replay uncertain scene actions."
         )
