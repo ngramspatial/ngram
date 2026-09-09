@@ -33,6 +33,7 @@ from ngram.cognition.history_compression import (
     merge_rolling_summary,
     prune_old_tool_results,
     sanitize_tool_pairs,
+    tool_safe_tail_start,
 )
 from ngram.cognition.inner_voice import InnerVoiceProcessor
 from ngram.cognition.reply_heuristics import (
@@ -1541,10 +1542,13 @@ class Entity:
         keep = max(8, int(self.config.cognition.rolling_history_max_messages or 200))
         if len(self._history) <= keep:
             return
-        dropped = self._history[:-keep]
+        start = tool_safe_tail_start(self._history, keep)
+        if start == 0:
+            return
+        dropped = self._history[:start]
         hc = self.config.cognition.history_compression
         if not hc.enabled or not dropped:
-            self._history = self._history[-keep:]
+            self._history = self._history[start:]
             return
         model = self.config.cognition.deliberate_model or self.config.harness.models.deliberate
         await report_context_status("compacting", source="history_count", automatic=True)
@@ -1567,7 +1571,7 @@ class Entity:
             return
         self._history_rolling_summary = summary
         before = len(self._history)
-        self._history = self._history[-keep:]
+        self._history = self._history[start:]
         await report_context_status(
             "compacted", source="history_count", automatic=True,
             messagesBefore=before, messagesAfter=len(self._history),

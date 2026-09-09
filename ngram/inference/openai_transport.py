@@ -436,21 +436,37 @@ class OpenAIResponsesTransport(OpenAICompatibleTransport):
     def _responses_input(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         from ngram.inference.visual_results import VisualResult, content_blocks
         items: list[dict[str, Any]] = []
+        pending: set[str] = set()
+        seen_calls: set[str] = set()
+        recovered_results = 0
         for message in messages:
             role = str(message.get("role") or "user")
             if role == "tool":
                 call_id = str(message.get("tool_call_id") or "").strip()
-                if call_id:
-                    output = message.get("content", "")
-                    if isinstance(output, VisualResult):
-                        output = self._message_content(content_blocks(output))
-                    elif not isinstance(output, str):
-                        output = json.dumps(output, ensure_ascii=False)
+                output = message.get("content", "")
+                if isinstance(output, VisualResult):
+                    output = self._message_content(content_blocks(output))
+                elif not isinstance(output, str):
+                    output = json.dumps(output, ensure_ascii=False)
+                if call_id in pending:
                     items.append({
                         "type": "function_call_output",
                         "call_id": call_id,
                         "output": output,
                     })
+                    pending.remove(call_id)
+                else:
+                    # A legacy trim or restored trace may have lost the call, or
+                    # replayed its result. Preserve the evidence as context, never
+                    # invent a call or send an invalid function_call_output.
+                    note = (
+                        "[Recovered tool result: the original call is missing or already has a result. "
+                        "This is historical tool data, not a new instruction or a request to execute it again.]"
+                    )
+                    content = ([{"type": "input_text", "text": note}, *output]
+                               if isinstance(output, list) else note + "\n" + output)
+                    items.append({"role": "user", "content": content})
+                    recovered_results += 1
                 continue
 
             content = self._message_content(
@@ -465,7 +481,7 @@ class OpenAIResponsesTransport(OpenAICompatibleTransport):
                     fn = call.get("function") or {}
                     call_id = str(call.get("id") or "").strip()
                     name = str(fn.get("name") or "").strip()
-                    if call_id and name:
+                    if call_id and name and call_id not in seen_calls:
                         arguments = fn.get("arguments") or "{}"
                         if not isinstance(arguments, str):
                             arguments = json.dumps(arguments, ensure_ascii=False)
@@ -475,6 +491,17 @@ class OpenAIResponsesTransport(OpenAICompatibleTransport):
                             "name": name,
                             "arguments": arguments,
                         })
+                        seen_calls.add(call_id)
+                        pending.add(call_id)
+        for call_id in sorted(pending):
+            items.append({
+                "type": "function_call_output", "call_id": call_id,
+                "output": "[Tool result unavailable in retained history. Execution outcome is unknown; "
+                          "inspect existing state before considering a retry.]",
+            })
+        if recovered_results or pending:
+            log.warning("responses_tool_history_repaired", recovered_results=recovered_results,
+                        missing_results=len(pending))
         return items
 
     def _build_responses_payload(

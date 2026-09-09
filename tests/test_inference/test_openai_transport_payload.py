@@ -272,3 +272,86 @@ def test_responses_result_maps_text_tools_and_usage() -> None:
     assert result.tool_calls[0].arguments == {"gesture": "wave"}
     assert result.tool_calls[0].id == "call_9"
     assert result.usage == {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
+
+
+def test_responses_recovers_orphaned_and_duplicate_outputs_without_losing_evidence():
+    from copy import deepcopy
+
+    messages = [
+        {"role": "tool", "tool_call_id": "trimmed", "content": "Mesh already published"},
+        {"role": "assistant", "content": "", "tool_calls": [
+            {"id": "live", "function": {"name": "inspect", "arguments": "{}"}},
+        ]},
+        {"role": "tool", "tool_call_id": "live", "content": "Ready"},
+        {"role": "tool", "tool_call_id": "live", "content": "Replayed receipt"},
+        {"role": "tool", "content": "Legacy unlabelled result"},
+        {"role": "user", "content": "Continue the sculpture"},
+    ]
+    original = deepcopy(messages)
+    items = OpenAIResponsesTransport()._responses_input(messages)
+    assert messages == original
+    assert [i["call_id"] for i in items if i.get("type") == "function_call_output"] == ["live"]
+    context = "\n".join(str(i.get("content", "")) for i in items)
+    for evidence in ("Mesh already published", "Replayed receipt", "Legacy unlabelled result"):
+        assert evidence in context
+    assert items[-1] == messages[-1]
+    assert "not a new instruction" in context
+
+
+def test_responses_recovery_retains_visuals_and_labels_unknown_execution():
+    from ngram.inference.visual_results import VisualResult
+
+    image = {"url": "data:image/png;base64,aW1hZ2U=", "label": "Working view"}
+    items = OpenAIResponsesTransport()._responses_input([
+        {"role": "tool", "tool_call_id": "late", "content": VisualResult("Render receipt", [image])},
+        {"role": "assistant", "content": "", "tool_calls": [
+            {"id": "late", "function": {"name": "render", "arguments": "{}"}},
+            {"id": "late", "function": {"name": "render", "arguments": "{}"}},
+        ]},
+    ])
+    assert items[0]["role"] == "user"
+    assert any(b.get("image_url") == image["url"] for b in items[0]["content"])
+    calls = [i for i in items if i.get("type") == "function_call"]
+    outputs = [i for i in items if i.get("type") == "function_call_output"]
+    assert len(calls) == len(outputs) == 1
+    assert outputs[0]["call_id"] == "late"
+    assert "outcome is unknown" in outputs[0]["output"]
+
+
+@pytest.mark.asyncio
+async def test_damaged_history_passes_responses_wire_validation_without_retry():
+    from aiohttp import web
+    from aiohttp.test_utils import TestServer
+
+    requests = []
+
+    async def responses(request):
+        payload = await request.json()
+        requests.append(payload)
+        pending = set()
+        for item in payload["input"]:
+            if item.get("type") == "function_call":
+                assert item["call_id"] not in pending
+                pending.add(item["call_id"])
+            if item.get("type") == "function_call_output":
+                if item["call_id"] not in pending:
+                    return web.json_response({"error": "No tool call found"}, status=400)
+                pending.remove(item["call_id"])
+        assert not pending
+        return web.json_response({"status": "completed", "output": [
+            {"type": "message", "content": [{"type": "output_text", "text": "Continuing."}]},
+        ]})
+
+    app = web.Application()
+    app.router.add_post("/v1/responses", responses)
+    async with TestServer(app) as server:
+        transport = OpenAIResponsesTransport(base_url=str(server.make_url("")))
+        try:
+            result = await transport.chat_completion("gpt-6-astra", [
+                {"role": "tool", "tool_call_id": "lost-during-compaction", "content": "Saved model"},
+                {"role": "user", "content": "Continue"},
+            ])
+            assert result.content == "Continuing."
+            assert len(requests) == 1
+        finally:
+            await transport.close()

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Preserve complete tool-call groups when trimming conversation history. Recover orphaned or replayed results before sending Responses API input, keep their evidence as historical context, and mark missing execution outcomes explicitly instead of failing subsequent turns with a 400 after compaction.
 - Shape the whole scene with `ar_environment`: procedural skies, panoramic image/HDR/EXR backgrounds, material reflections, directional and ambient lighting, fog, exposure, and ground visibility. Failed sky loads preserve the last working environment; saved scenes retain their settings. Native Settings exposes the same sky and lighting controls, with passthrough preserved by default in XR.
 - Render 360-degree panoramas from persistent Blender projects on the existing execution host. Agents receive the image and a skybox payload they can apply directly in Spatial through the authenticated gateway, without external image storage or model polling.
 - Keep Figments clear of visual clutter: grip guides start hidden, can be enabled per object, and use fine periwinkle outlines. Clicking empty space or outside the Objects inspector deselects creations; inspector edits and active grabs retain their selection.

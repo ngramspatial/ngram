@@ -232,6 +232,11 @@ def _align_boundary_backward(messages: list[dict[str, Any]], idx: int) -> int:
     return idx
 
 
+def tool_safe_tail_start(messages: list[dict[str, Any]], keep: int) -> int:
+    """Keep the requested tail plus any tool group crossing its boundary."""
+    return _align_boundary_backward(messages, max(0, len(messages) - keep))
+
+
 def find_compaction_boundaries(
     messages: list[dict[str, Any]],
     head_n: int,

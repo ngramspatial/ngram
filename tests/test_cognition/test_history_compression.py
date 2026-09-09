@@ -123,3 +123,36 @@ async def test_trim_skips_merge_when_disabled(entity_config):
     assert len(ent._history) == 8
     assert stub.calls == 0
     assert ent._messages_for_model({"role": "user", "content": "u"})[-2]["content"] == "x9"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("compression_enabled", [True, False])
+async def test_history_limit_preserves_parallel_tool_group(entity_config, compression_enabled):
+    from ngram.inference.openai_transport import OpenAIResponsesTransport
+
+    entity_config.cognition.history_compression.enabled = compression_enabled
+    ent = Entity(entity_config)
+    ent.client = _MergeStub()
+    group = [
+        {"role": "assistant", "content": "", "tool_calls": [
+            {"id": call_id, "function": {"name": "inspect", "arguments": "{}"}}
+            for call_id in ("first", "second")
+        ]},
+        {"role": "tool", "tool_call_id": "first", "content": "First result"},
+        {"role": "tool", "tool_call_id": "second", "content": "Second result"},
+    ]
+    ent._history = [{"role": "user", "content": "Earlier request"},
+                    {"role": "assistant", "content": "Earlier answer"}] + group + [
+        {"role": "user" if i % 2 == 0 else "assistant", "content": f"Recent {i}"}
+        for i in range(7)
+    ]
+    # The former [-8:] trim began at the second result, dropping its call.
+    await ent._trim_history_with_compression()
+    assert ent._history[:3] == group
+    assert len(ent._history) == 10
+    assert ent.client.calls == int(compression_enabled)
+    items = OpenAIResponsesTransport()._responses_input(
+        ent._messages_for_model({"role": "user", "content": "Continue"})
+    )
+    assert [i["call_id"] for i in items if i.get("type") == "function_call"] == ["first", "second"]
+    assert [i["output"] for i in items if i.get("type") == "function_call_output"] == ["First result", "Second result"]
